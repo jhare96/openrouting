@@ -691,16 +691,17 @@ pub fn route_single_pass(design: &DsnDesign, priority_nets: &[String]) -> Routin
                     net_wires.extend(w);
                     net_vias.extend(v);
 
-                    // Mark path as obstacle
+                    // Mark path as obstacle (circular clearance zone)
                     for state in &p {
                         routed_cells.insert((state.gx, state.gy, state.layer as usize));
-                        // Mark with clearance on grid
-                        for dy in -pad_radius_cells..=pad_radius_cells {
-                            for dx in -pad_radius_cells..=pad_radius_cells {
-                                let nx = state.gx as i64 + dx;
-                                let ny = state.gy as i64 + dy;
-                                if grid.in_bounds(nx, ny) {
-                                    grid.set_obstacle(state.layer as usize, nx, ny);
+                        for dy in -clearance_cells..=clearance_cells {
+                            for dx in -clearance_cells..=clearance_cells {
+                                if dx * dx + dy * dy <= clearance_cells * clearance_cells {
+                                    let nx = state.gx as i64 + dx;
+                                    let ny = state.gy as i64 + dy;
+                                    if grid.in_bounds(nx, ny) {
+                                        grid.set_obstacle(state.layer as usize, nx, ny);
+                                    }
                                 }
                             }
                         }
