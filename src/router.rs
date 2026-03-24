@@ -446,8 +446,12 @@ pub fn route(design: &DsnDesign) -> RoutingResult {
         unrouted: Vec::new(),
     };
 
+    // Sort nets: route larger nets (more pins) first to reduce congestion
+    let mut sorted_nets: Vec<&crate::dsn::Net> = design.nets.iter().collect();
+    sorted_nets.sort_by(|a, b| b.pins.len().cmp(&a.pins.len()));
+
     // For each net, gather pad positions and route between them
-    for net in &design.nets {
+    for net in &sorted_nets {
         if net.pins.len() < 2 {
             continue;
         }
@@ -601,6 +605,10 @@ fn mark_pads(grid: &mut Grid, design: &DsnDesign, signal_layers: &[usize], clear
                             width.max(height) / 2 / grid_size + clearance_cells
                         }
                         PadShape::Path { width, .. } => width / 2 / grid_size + clearance_cells,
+                        PadShape::Polygon { points, .. } => {
+                            let max_extent = points.iter().map(|p| p.x.abs().max(p.y.abs())).max().unwrap_or(0);
+                            max_extent / grid_size + clearance_cells
+                        }
                     })
                     .unwrap_or(clearance_cells + 1);
 
@@ -613,6 +621,7 @@ fn mark_pads(grid: &mut Grid, design: &DsnDesign, signal_layers: &[usize], clear
                         PadShape::Circle { layer, .. } => layer.as_str(),
                         PadShape::Rect { layer, .. } => layer.as_str(),
                         PadShape::Oval { layer, .. } => layer.as_str(),
+                        PadShape::Polygon { layer, .. } => layer.as_str(),
                         PadShape::Path { layer, .. } => layer.as_str(),
                     })
                     .unwrap_or("*.Cu");

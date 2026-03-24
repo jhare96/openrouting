@@ -77,6 +77,7 @@ pub enum PadShape {
     Circle { layer: String, diameter: i64 },
     Rect { layer: String, x1: i64, y1: i64, x2: i64, y2: i64 },
     Oval { layer: String, width: i64, height: i64 },
+    Polygon { layer: String, points: Vec<Point> },
     Path { layer: String, width: i64, points: Vec<Point> },
 }
 
@@ -590,6 +591,20 @@ fn parse_pad_shape(node: &Sexp) -> Option<PadShape> {
             }
             Some(PadShape::Path { layer, width, points })
         }
+        "polygon" => {
+            let layer = list.get(1)?.as_atom()?.to_string();
+            let _aperture_width = list.get(2).map(parse_i64).unwrap_or(0);
+            let mut points = Vec::new();
+            let mut i = 3;
+            while i + 1 < list.len() {
+                points.push(Point {
+                    x: parse_i64(&list[i]),
+                    y: parse_i64(&list[i + 1]),
+                });
+                i += 2;
+            }
+            Some(PadShape::Polygon { layer, points })
+        }
         _ => None,
     }
 }
@@ -753,6 +768,7 @@ pub fn get_pad_position(
                 PadShape::Circle { layer, .. } => layer.as_str(),
                 PadShape::Rect { layer, .. } => layer.as_str(),
                 PadShape::Oval { layer, .. } => layer.as_str(),
+                PadShape::Polygon { layer, .. } => layer.as_str(),
                 PadShape::Path { layer, .. } => layer.as_str(),
             };
             if l == "*.Cu" {
