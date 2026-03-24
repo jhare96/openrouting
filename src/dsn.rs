@@ -427,10 +427,17 @@ fn parse_rule(node: &Sexp) -> DesignRule {
                     }
             }
             Some("clearance") => {
-                if let Some(items) = item.as_list()
-                    && let Some(v) = items.get(1) {
-                        clearance = parse_i64(v);
+                // Only use the default clearance (no "type" specifier).
+                // Entries like (clearance 50 (type smd_smd)) are type-specific
+                // overrides that shouldn't replace the general clearance.
+                if let Some(items) = item.as_list() {
+                    let has_type = items.iter().any(|child| child.name() == Some("type"));
+                    if !has_type {
+                        if let Some(v) = items.get(1) {
+                            clearance = parse_i64(v);
+                        }
                     }
+                }
             }
             _ => {}
         }

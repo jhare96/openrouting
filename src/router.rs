@@ -90,6 +90,21 @@ impl Grid {
             }
         }
     }
+
+    /// Clear obstacles in a circle of radius `r` around (cx, cy).
+    fn clear_circle(&mut self, layer: usize, cx: i64, cy: i64, r: i64) {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx * dx + dy * dy <= r * r {
+                    let gx = cx + dx;
+                    let gy = cy + dy;
+                    if self.in_bounds(gx, gy) {
+                        self.obstacles[layer][gy as usize * self.width + gx as usize] = false;
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ─── BFS workspace (flat arrays with generation counting) ─────────────────────
@@ -396,7 +411,7 @@ fn merge_collinear(pts: Vec<(i64, i64)>) -> Vec<(i64, i64)> {
 // ─── Main routing function ────────────────────────────────────────────────────
 
 /// Maximum number of rip-up-and-retry passes before giving up.
-const MAX_ROUTING_PASSES: usize = 5;
+const MAX_ROUTING_PASSES: usize = 10;
 
 pub fn route(design: &DsnDesign) -> RoutingResult {
     // First pass: normal ordering (largest nets first)
@@ -442,8 +457,8 @@ pub fn route_single_pass(design: &DsnDesign, priority_nets: &[String]) -> Routin
     // Ensure we don't make the grid too large
     let board_w = (design.boundary.max_x - design.boundary.min_x).max(1);
     let board_h = (design.boundary.max_y - design.boundary.min_y).max(1);
-    // Cap at 500x500 cells
-    while board_w / grid_size > 500 || board_h / grid_size > 500 {
+    // Cap at 1500x1500 cells (supports fine resolution on larger boards)
+    while board_w / grid_size > 1500 || board_h / grid_size > 1500 {
         grid_size = (grid_size as f64 * 1.5) as i64;
     }
     grid_size = grid_size.max(1);
@@ -487,13 +502,22 @@ pub fn route_single_pass(design: &DsnDesign, priority_nets: &[String]) -> Routin
     // Build the priority set for O(1) lookups
     let priority_set: HashSet<&str> = priority_nets.iter().map(|s| s.as_str()).collect();
 
-    // Sort nets: priority nets first, then by pin count descending
+    // Sort nets: priority nets first (by ascending pin count so small nets
+    // get first access to congested areas), then remaining nets by descending
+    // pin count (the standard heuristic).
     let mut sorted_nets: Vec<&crate::dsn::Net> = design.nets.iter().collect();
     sorted_nets.sort_by(|a, b| {
         let a_pri = priority_set.contains(a.name.as_str());
         let b_pri = priority_set.contains(b.name.as_str());
-        // Priority nets come first, then sort by pin count descending
-        b_pri.cmp(&a_pri).then_with(|| b.pins.len().cmp(&a.pins.len()))
+        b_pri.cmp(&a_pri).then_with(|| {
+            if a_pri {
+                // Among priority nets: small nets first (ascending)
+                a.pins.len().cmp(&b.pins.len())
+            } else {
+                // Among non-priority nets: large nets first (descending)
+                b.pins.len().cmp(&a.pins.len())
+            }
+        })
     });
 
     // For each net, gather pad positions and route between them
@@ -524,18 +548,121 @@ pub fn route_single_pass(design: &DsnDesign, priority_nets: &[String]) -> Routin
             continue;
         }
 
+        // Collect pad obstacle info for this net: (grid_x, grid_y, layer, obstacle_radius)
+        let net_pad_obstacles: Vec<(i64, i64, Vec<usize>, i64)> = net
+            .pins
+            .iter()
+            .filter_map(|pin_ref| {
+                let pos = crate::dsn::get_pad_position(design, &pin_ref.component, &pin_ref.pin)?;
+                let (gx, gy) = grid.dsn_to_grid(pos.0, pos.1);
+
+                // Look up padstack to get obstacle radius and layers
+                let comp = design.components.iter().find(|c| c.places.iter().any(|p| p.reference == pin_ref.component))?;
+                let image = design.images.get(&comp.image_name)?;
+                let pin = image.pins.iter().find(|p| p.pin_number == pin_ref.pin)?;
+                let padstack = design.padstacks.get(&pin.padstack_name)?;
+
+                let pad_radius = padstack.shapes.first()
+                    .map(|shape| match shape {
+                        PadShape::Circle { diameter, .. } => diameter / 2 / grid_size + clearance_cells,
+                        PadShape::Rect { x1, y1, x2, y2, .. } => {
+                            let w = (x2 - x1).abs();
+                            let h = (y2 - y1).abs();
+                            w.max(h) / 2 / grid_size + clearance_cells
+                        }
+                        PadShape::Oval { width, height, .. } => {
+                            width.max(height) / 2 / grid_size + clearance_cells
+                        }
+                        PadShape::Path { width, .. } => width / 2 / grid_size + clearance_cells,
+                        PadShape::Polygon { points, .. } => {
+                            let max_extent = points.iter().map(|p| p.x.abs().max(p.y.abs())).max().unwrap_or(0);
+                            max_extent / grid_size + clearance_cells
+                        }
+                    })
+                    .unwrap_or(clearance_cells + 1);
+
+                // Determine which layers this pad exists on
+                let mut layers = Vec::new();
+                for shape in &padstack.shapes {
+                    let layer_name = match shape {
+                        PadShape::Circle { layer, .. } => layer.as_str(),
+                        PadShape::Rect { layer, .. } => layer.as_str(),
+                        PadShape::Oval { layer, .. } => layer.as_str(),
+                        PadShape::Polygon { layer, .. } => layer.as_str(),
+                        PadShape::Path { layer, .. } => layer.as_str(),
+                    };
+                    if layer_name == "*.Cu" {
+                        layers.extend(signal_layers.iter().copied());
+                        break;
+                    } else {
+                        let li = layer_index(design, layer_name, &signal_layers);
+                        if !layers.contains(&li) {
+                            layers.push(li);
+                        }
+                    }
+                }
+                if layers.is_empty() {
+                    layers.extend(signal_layers.iter().copied());
+                }
+
+                Some((gx, gy, layers, pad_radius))
+            })
+            .collect();
+
+        // Clear own-net pad obstacles so BFS can start/end at pads
+        for &(gx, gy, ref layers, r) in &net_pad_obstacles {
+            for &layer in layers {
+                grid.clear_circle(layer, gx, gy, r);
+            }
+        }
+
+        if valid_pads.len() < 2 {
+            result.unrouted.push(net.name.clone());
+            // Restore pad obstacles since this net wasn't routed
+            for &(gx, gy, ref layers, r) in &net_pad_obstacles {
+                for &layer in layers {
+                    grid.mark_circle(layer, gx, gy, r);
+                }
+            }
+            continue;
+        }
+
+        // Determine which pads are through-hole (multi-layer)
+        let pad_is_through_hole: Vec<bool> = net
+            .pins
+            .iter()
+            .map(|pin_ref| {
+                let comp = design.components.iter().find(|c| c.places.iter().any(|p| p.reference == pin_ref.component));
+                let is_th = comp.and_then(|c| {
+                    let image = design.images.get(&c.image_name)?;
+                    let pin = image.pins.iter().find(|p| p.pin_number == pin_ref.pin)?;
+                    let ps = design.padstacks.get(&pin.padstack_name)?;
+                    // Through-hole if pad has shapes on more than one layer
+                    Some(ps.shapes.len() > 1)
+                });
+                is_th.unwrap_or(false)
+            })
+            .collect();
+
         // Route: connect pads sequentially (first to second, then extend to third, etc.)
         let mut routed_cells: HashSet<(i32, i32, usize)> = HashSet::new();
-        // Start from first pad
+        // Start from first pad – for TH pads, add start cells on all signal layers
         let (fx, fy, fl) = valid_pads[0];
         let (fgx, fgy) = grid.dsn_to_grid(fx, fy);
-        routed_cells.insert((fgx as i32, fgy as i32, fl));
+        if pad_is_through_hole.first().copied().unwrap_or(false) {
+            for &sl in &signal_layers {
+                routed_cells.insert((fgx as i32, fgy as i32, sl));
+            }
+        } else {
+            routed_cells.insert((fgx as i32, fgy as i32, fl));
+        }
 
         let mut net_routed = true;
         let mut net_wires: Vec<RoutedWire> = Vec::new();
         let mut net_vias: Vec<RoutedVia> = Vec::new();
 
-        for &(tx, ty, tl) in valid_pads.iter().skip(1) {
+        // Track valid_pads index for through-hole check (skip first, so i=0 → second pad)
+        for (i, &(tx, ty, tl)) in valid_pads.iter().skip(1).enumerate() {
             let (tgx, tgy) = grid.dsn_to_grid(tx, ty);
             let target_layer = tl;
 
@@ -583,8 +710,15 @@ pub fn route_single_pass(design: &DsnDesign, priority_nets: &[String]) -> Routin
                             }
                         }
                     }
-                    // Also add target cell to routed
-                    routed_cells.insert((tgx as i32, tgy as i32, tl));
+                    // Also add target cell to routed (on all signal layers for TH pads)
+                    let target_is_th = pad_is_through_hole.get(i + 1).copied().unwrap_or(false);
+                    if target_is_th {
+                        for &sl in &signal_layers {
+                            routed_cells.insert((tgx as i32, tgy as i32, sl));
+                        }
+                    } else {
+                        routed_cells.insert((tgx as i32, tgy as i32, tl));
+                    }
                 }
                 None => {
                     net_routed = false;
@@ -592,11 +726,21 @@ pub fn route_single_pass(design: &DsnDesign, priority_nets: &[String]) -> Routin
             }
         }
 
-        if net_routed {
-            result.wires.extend(net_wires);
-            result.vias.extend(net_vias);
-        } else {
+        // Always keep successfully routed segments (even if some pins failed).
+        // This is critical for large multi-pin nets (e.g., AGND with 211 pins)
+        // where most pins connect but a few fail.
+        result.wires.extend(net_wires);
+        result.vias.extend(net_vias);
+
+        if !net_routed {
             result.unrouted.push(net.name.clone());
+        }
+
+        // Restore pad obstacles for other nets
+        for &(gx, gy, ref layers, r) in &net_pad_obstacles {
+            for &layer in layers {
+                grid.mark_circle(layer, gx, gy, r);
+            }
         }
     }
 
@@ -635,10 +779,9 @@ fn mark_pads(grid: &mut Grid, design: &DsnDesign, signal_layers: &[usize], clear
 
                 let (gx, gy) = grid.dsn_to_grid(abs_x, abs_y);
 
-                // Determine pad size from padstack
-                let pad_radius = design
-                    .padstacks
-                    .get(&pin.padstack_name)
+                // Determine pad size from padstack (use max across all shapes)
+                let padstack = design.padstacks.get(&pin.padstack_name);
+                let pad_radius = padstack
                     .and_then(|ps| ps.shapes.first())
                     .map(|shape| match shape {
                         PadShape::Circle { diameter, .. } => diameter / 2 / grid_size + clearance_cells,
@@ -658,27 +801,36 @@ fn mark_pads(grid: &mut Grid, design: &DsnDesign, signal_layers: &[usize], clear
                     })
                     .unwrap_or(clearance_cells + 1);
 
-                // Mark on all signal layers (through-hole or "*.Cu")
-                let pad_layer = design
-                    .padstacks
-                    .get(&pin.padstack_name)
-                    .and_then(|ps| ps.shapes.first())
-                    .map(|shape| match shape {
-                        PadShape::Circle { layer, .. } => layer.as_str(),
-                        PadShape::Rect { layer, .. } => layer.as_str(),
-                        PadShape::Oval { layer, .. } => layer.as_str(),
-                        PadShape::Polygon { layer, .. } => layer.as_str(),
-                        PadShape::Path { layer, .. } => layer.as_str(),
-                    })
-                    .unwrap_or("*.Cu");
-
-                if pad_layer == "*.Cu" {
+                // Mark obstacles on each layer where the pad has a shape.
+                // Iterate over ALL shapes to handle multi-layer (through-hole) pads.
+                let mut marked_any = false;
+                if let Some(ps) = padstack {
+                    for shape in &ps.shapes {
+                        let layer_name = match shape {
+                            PadShape::Circle { layer, .. } => layer.as_str(),
+                            PadShape::Rect { layer, .. } => layer.as_str(),
+                            PadShape::Oval { layer, .. } => layer.as_str(),
+                            PadShape::Polygon { layer, .. } => layer.as_str(),
+                            PadShape::Path { layer, .. } => layer.as_str(),
+                        };
+                        if layer_name == "*.Cu" {
+                            for &sl in signal_layers {
+                                grid.mark_circle(sl, gx, gy, pad_radius);
+                            }
+                            marked_any = true;
+                            break;
+                        } else {
+                            let li = layer_index(design, layer_name, signal_layers);
+                            grid.mark_circle(li, gx, gy, pad_radius);
+                            marked_any = true;
+                        }
+                    }
+                }
+                if !marked_any {
+                    // Fallback: mark on all signal layers
                     for &sl in signal_layers {
                         grid.mark_circle(sl, gx, gy, pad_radius);
                     }
-                } else {
-                    let li = layer_index(design, pad_layer, signal_layers);
-                    grid.mark_circle(li, gx, gy, pad_radius);
                 }
             }
         }
