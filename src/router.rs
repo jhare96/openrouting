@@ -395,7 +395,45 @@ fn merge_collinear(pts: Vec<(i64, i64)>) -> Vec<(i64, i64)> {
 
 // ─── Main routing function ────────────────────────────────────────────────────
 
+/// Maximum number of rip-up-and-retry passes before giving up.
+const MAX_ROUTING_PASSES: usize = 5;
+
 pub fn route(design: &DsnDesign) -> RoutingResult {
+    // First pass: normal ordering (largest nets first)
+    let mut best = route_single_pass(design, &[]);
+
+    for pass in 1..MAX_ROUTING_PASSES {
+        if best.unrouted.is_empty() {
+            break;
+        }
+
+        // Re-route with previously-unrouted nets given priority
+        let priority_nets: Vec<String> = best.unrouted.clone();
+        eprintln!(
+            "Pass {}: {} unrouted net(s), retrying with priority: {}",
+            pass + 1,
+            priority_nets.len(),
+            priority_nets.join(", "),
+        );
+        let candidate = route_single_pass(design, &priority_nets);
+
+        if candidate.unrouted.len() < best.unrouted.len() {
+            best = candidate;
+        } else {
+            // No improvement – stop early
+            break;
+        }
+    }
+
+    best
+}
+
+/// Run a single routing pass over the design.
+///
+/// Nets whose names appear in `priority_nets` are routed first; the remaining
+/// nets are routed in descending pin-count order (the same heuristic used by
+/// the original single-pass router).
+fn route_single_pass(design: &DsnDesign, priority_nets: &[String]) -> RoutingResult {
     let trace_width = design.rules.trace_width.max(1);
     let clearance = design.rules.clearance.max(1);
 
@@ -446,9 +484,17 @@ pub fn route(design: &DsnDesign) -> RoutingResult {
         unrouted: Vec::new(),
     };
 
-    // Sort nets: route larger nets (more pins) first to reduce congestion
+    // Build the priority set for O(1) lookups
+    let priority_set: HashSet<&str> = priority_nets.iter().map(|s| s.as_str()).collect();
+
+    // Sort nets: priority nets first, then by pin count descending
     let mut sorted_nets: Vec<&crate::dsn::Net> = design.nets.iter().collect();
-    sorted_nets.sort_by(|a, b| b.pins.len().cmp(&a.pins.len()));
+    sorted_nets.sort_by(|a, b| {
+        let a_pri = priority_set.contains(a.name.as_str());
+        let b_pri = priority_set.contains(b.name.as_str());
+        // Priority nets come first, then sort by pin count descending
+        b_pri.cmp(&a_pri).then_with(|| b.pins.len().cmp(&a.pins.len()))
+    });
 
     // For each net, gather pad positions and route between them
     for net in &sorted_nets {
