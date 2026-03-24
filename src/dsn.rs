@@ -124,7 +124,7 @@ pub struct DsnDesign {
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-fn atom_str<'a>(s: &'a Sexp) -> &'a str {
+fn atom_str(s: &Sexp) -> &str {
     s.as_atom().unwrap_or("")
 }
 
@@ -420,18 +420,16 @@ fn parse_rule(node: &Sexp) -> DesignRule {
     for item in list.iter().skip(1) {
         match item.name() {
             Some("width") => {
-                if let Some(items) = item.as_list() {
-                    if let Some(v) = items.get(1) {
+                if let Some(items) = item.as_list()
+                    && let Some(v) = items.get(1) {
                         trace_width = parse_i64(v);
                     }
-                }
             }
             Some("clearance") => {
-                if let Some(items) = item.as_list() {
-                    if let Some(v) = items.get(1) {
+                if let Some(items) = item.as_list()
+                    && let Some(v) = items.get(1) {
                         clearance = parse_i64(v);
                     }
-                }
             }
             _ => {}
         }
@@ -535,11 +533,10 @@ fn parse_padstack(node: &Sexp) -> Option<Padstack> {
     for item in list.iter().skip(2) {
         match item.name() {
             Some("shape") => {
-                if let Some(shape_node) = item.as_list().and_then(|l| l.get(1)) {
-                    if let Some(shape) = parse_pad_shape(shape_node) {
+                if let Some(shape_node) = item.as_list().and_then(|l| l.get(1))
+                    && let Some(shape) = parse_pad_shape(shape_node) {
                         shapes.push(shape);
                     }
-                }
             }
             Some("attach") => {
                 attach = item
@@ -610,11 +607,10 @@ fn parse_placement(node: Option<&Sexp>) -> Vec<Component> {
             let image_name = items.get(1).and_then(|s| s.as_atom()).unwrap_or("").to_string();
             let mut places = Vec::new();
             for child in items.iter().skip(2) {
-                if child.name() == Some("place") {
-                    if let Some(place) = parse_place(child) {
+                if child.name() == Some("place")
+                    && let Some(place) = parse_place(child) {
                         places.push(place);
                     }
-                }
             }
             components.push(Component { image_name, places });
         }
@@ -670,11 +666,10 @@ fn parse_wiring(node: Option<&Sexp>) -> Vec<Wire> {
     };
 
     for item in list.iter().skip(1) {
-        if item.name() == Some("wire") {
-            if let Some(wire) = parse_wire(item) {
+        if item.name() == Some("wire")
+            && let Some(wire) = parse_wire(item) {
                 wires.push(wire);
             }
-        }
     }
 
     wires

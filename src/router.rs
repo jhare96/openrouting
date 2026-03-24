@@ -123,13 +123,13 @@ fn bfs(
     let mut heap: BinaryHeap<Reverse<(u32, State)>> = BinaryHeap::new();
 
     for &(gx, gy, layer) in start_cells {
-        let s = State { gx: gx as i32, gy: gy as i32, layer: layer as u8 };
+        let s = State { gx, gy, layer: layer as u8 };
         dist.insert(s, 0);
         heap.push(Reverse((0, s)));
     }
 
     while let Some(Reverse((cost, cur))) = heap.pop() {
-        if target_cells.contains(&(cur.gx as i32, cur.gy as i32, cur.layer as usize)) {
+        if target_cells.contains(&(cur.gx, cur.gy, cur.layer as usize)) {
             // Backtrack
             let mut path = vec![cur];
             let mut node = cur;
@@ -154,7 +154,7 @@ fn bfs(
             }
             if grid.is_obstacle(cur.layer as usize, nx as i64, ny as i64) {
                 // Allow if this is a target cell
-                let is_target = target_cells.contains(&(nx as i32, ny as i32, cur.layer as usize));
+                let is_target = target_cells.contains(&(nx, ny, cur.layer as usize));
                 if !is_target {
                     continue;
                 }
@@ -175,7 +175,7 @@ fn bfs(
                 continue;
             }
             if grid.is_obstacle(other_layer, cur.gx as i64, cur.gy as i64) {
-                let is_target = target_cells.contains(&(cur.gx as i32, cur.gy as i32, other_layer));
+                let is_target = target_cells.contains(&(cur.gx, cur.gy, other_layer));
                 if !is_target {
                     continue;
                 }
@@ -355,9 +355,9 @@ pub fn route(design: &DsnDesign) -> RoutingResult {
         let valid_pads: Vec<(i64, i64, usize)> = pad_positions
             .iter()
             .filter_map(|pos| pos.as_ref())
-            .filter_map(|(x, y, layer_name)| {
+            .map(|(x, y, layer_name)| {
                 let layer_idx = layer_index(design, layer_name, &signal_layers);
-                Some((*x, *y, layer_idx))
+                (*x, *y, layer_idx)
             })
             .collect();
 
@@ -377,8 +377,7 @@ pub fn route(design: &DsnDesign) -> RoutingResult {
         let mut net_wires: Vec<RoutedWire> = Vec::new();
         let mut net_vias: Vec<RoutedVia> = Vec::new();
 
-        for pad_idx in 1..valid_pads.len() {
-            let (tx, ty, tl) = valid_pads[pad_idx];
+        for &(tx, ty, tl) in valid_pads.iter().skip(1) {
             let (tgx, tgy) = grid.dsn_to_grid(tx, ty);
             let target_layer = tl;
 
