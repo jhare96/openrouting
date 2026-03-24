@@ -452,8 +452,10 @@ pub fn route_single_pass(design: &DsnDesign, priority_nets: &[String]) -> Routin
     let trace_width = design.rules.trace_width.max(1);
     let clearance = design.rules.clearance.max(1);
 
-    // Grid size: coarse enough for performance, fine enough for accuracy
-    let mut grid_size = trace_width.max(clearance);
+    // Grid size: use half the trace width or clearance for better resolution.
+    // This ensures at least 2 grid cells per trace width and per clearance,
+    // giving the router finer control over track placement.
+    let mut grid_size = (trace_width.max(clearance) + 1) / 2;
     // Ensure we don't make the grid too large
     let board_w = (design.boundary.max_x - design.boundary.min_x).max(1);
     let board_h = (design.boundary.max_y - design.boundary.min_y).max(1);
@@ -503,21 +505,14 @@ pub fn route_single_pass(design: &DsnDesign, priority_nets: &[String]) -> Routin
     let priority_set: HashSet<&str> = priority_nets.iter().map(|s| s.as_str()).collect();
 
     // Sort nets: priority nets first (by ascending pin count so small nets
-    // get first access to congested areas), then remaining nets by descending
-    // pin count (the standard heuristic).
+    // get first access to congested areas), then remaining nets also by
+    // ascending pin count. Routing small nets first prevents large high-fanout
+    // nets (like ground planes) from consuming channels that small nets need.
     let mut sorted_nets: Vec<&crate::dsn::Net> = design.nets.iter().collect();
     sorted_nets.sort_by(|a, b| {
         let a_pri = priority_set.contains(a.name.as_str());
         let b_pri = priority_set.contains(b.name.as_str());
-        b_pri.cmp(&a_pri).then_with(|| {
-            if a_pri {
-                // Among priority nets: small nets first (ascending)
-                a.pins.len().cmp(&b.pins.len())
-            } else {
-                // Among non-priority nets: large nets first (descending)
-                b.pins.len().cmp(&a.pins.len())
-            }
-        })
+        b_pri.cmp(&a_pri).then_with(|| a.pins.len().cmp(&b.pins.len()))
     });
 
     // For each net, gather pad positions and route between them

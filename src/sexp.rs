@@ -122,12 +122,33 @@ fn parse_items(chars: &mut Peekable) -> Result<Vec<Sexp>, String> {
             }
             _ => {
                 let mut atom = String::new();
-                while let Some(&c) = chars.peek() {
-                    if c == '(' || c == ')' || c == '"' || c.is_whitespace() {
-                        break;
+                loop {
+                    match chars.peek().copied() {
+                        None | Some('(') | Some(')') => break,
+                        Some(c) if c.is_whitespace() => break,
+                        Some('"') => {
+                            // Quoted string embedded in atom (e.g., X14-"D-")
+                            // Preserve the quotes so downstream parsers can detect the boundary.
+                            chars.next(); // consume opening '"'
+                            atom.push('"');
+                            loop {
+                                match chars.next() {
+                                    None => break,
+                                    Some('"') => { atom.push('"'); break; }
+                                    Some('\\') => {
+                                        if let Some(c) = chars.next() {
+                                            atom.push(c);
+                                        }
+                                    }
+                                    Some(c) => atom.push(c),
+                                }
+                            }
+                        }
+                        Some(c) => {
+                            atom.push(c);
+                            chars.next();
+                        }
                     }
-                    atom.push(c);
-                    chars.next();
                 }
                 if !atom.is_empty() {
                     items.push(Sexp::Atom(atom));
