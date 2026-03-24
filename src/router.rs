@@ -162,6 +162,15 @@ impl BfsWorkspace {
     }
 
     #[inline(always)]
+    fn get_prev(&self, idx: usize) -> u32 {
+        if self.generation[idx] == self.current_gen {
+            self.prev[idx]
+        } else {
+            u32::MAX
+        }
+    }
+
+    #[inline(always)]
     fn set_dist_prev(&mut self, idx: usize, dist: u32, prev: u32) {
         self.dist[idx] = dist;
         self.prev[idx] = prev;
@@ -209,7 +218,7 @@ fn bfs(
     target_center: (i32, i32),
     signal_layers: &[usize],
     ws: &mut BfsWorkspace,
-    heap: &mut BinaryHeap<Reverse<(u32, State)>>,
+    heap: &mut BinaryHeap<Reverse<(u32, u32, State)>>,
 ) -> Option<Vec<State>> {
     if start_cells.is_empty() || ws.target_indices.is_empty() {
         return None;
@@ -223,15 +232,14 @@ fn bfs(
         let idx = ws.idx(gx, gy, layer);
         ws.set_dist_prev(idx, 0, u32::MAX);
         let h = heuristic(gx, gy, tcx, tcy);
-        heap.push(Reverse((h, s)));
+        heap.push(Reverse((h, 0, s)));
     }
 
-    while let Some(Reverse((f_cost, cur))) = heap.pop() {
+    while let Some(Reverse((_f_cost, g_cost, cur))) = heap.pop() {
         let cur_idx = ws.idx(cur.gx, cur.gy, cur.layer as usize);
-        let g = ws.get_dist(cur_idx);
 
-        // Skip stale heap entries
-        if g + heuristic(cur.gx, cur.gy, tcx, tcy) < f_cost {
+        // Skip stale heap entries (a shorter path was already found)
+        if ws.get_dist(cur_idx) < g_cost {
             continue;
         }
 
@@ -240,7 +248,7 @@ fn bfs(
             let mut path = vec![cur];
             let mut idx = cur_idx;
             loop {
-                let p = if ws.generation[idx] == ws.current_gen { ws.prev[idx] } else { u32::MAX };
+                let p = ws.get_prev(idx);
                 if p == u32::MAX { break; }
                 path.push(ws.decode_index(p as usize));
                 idx = p as usize;
@@ -261,11 +269,11 @@ fn bfs(
                 continue;
             }
             let move_cost = if dx != 0 && dy != 0 { 14u32 } else { 10u32 };
-            let new_g = g + move_cost;
+            let new_g = g_cost + move_cost;
             if new_g < ws.get_dist(ns_idx) {
                 ws.set_dist_prev(ns_idx, new_g, cur_idx as u32);
                 let h = heuristic(nx, ny, tcx, tcy);
-                heap.push(Reverse((new_g + h, State { gx: nx, gy: ny, layer: cur.layer })));
+                heap.push(Reverse((new_g + h, new_g, State { gx: nx, gy: ny, layer: cur.layer })));
             }
         }
 
@@ -278,11 +286,11 @@ fn bfs(
             if grid.is_obstacle(other_layer, cur.gx as i64, cur.gy as i64) && !ws.target[ns_idx] {
                 continue;
             }
-            let new_g = g + 100;
+            let new_g = g_cost + 100;
             if new_g < ws.get_dist(ns_idx) {
                 ws.set_dist_prev(ns_idx, new_g, cur_idx as u32);
                 let h = heuristic(cur.gx, cur.gy, tcx, tcy);
-                heap.push(Reverse((new_g + h, State { gx: cur.gx, gy: cur.gy, layer: other_layer as u8 })));
+                heap.push(Reverse((new_g + h, new_g, State { gx: cur.gx, gy: cur.gy, layer: other_layer as u8 })));
             }
         }
     }
@@ -430,7 +438,7 @@ pub fn route(design: &DsnDesign) -> RoutingResult {
 
     // Reusable BFS workspace and heap (avoids per-search allocations)
     let mut ws = BfsWorkspace::new(grid_w, grid_h, num_layers);
-    let mut heap: BinaryHeap<Reverse<(u32, State)>> = BinaryHeap::new();
+    let mut heap: BinaryHeap<Reverse<(u32, u32, State)>> = BinaryHeap::new();
 
     let mut result = RoutingResult {
         wires: Vec::new(),
