@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# Benchmark script: compare openrouting vs freerouting on real-world DSN files.
+#
+# Usage:
+#   ./run_benchmarks.sh                        # run all benchmarks with openrouting only
+#   ./run_benchmarks.sh --freerouting path/to/freerouting-executable.jar
+#
+# Requirements:
+#   - openrouting must be built first: cargo build --release (from repo root)
+#   - java is required only when --freerouting is supplied
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+OPENROUTING="$REPO_ROOT/target/release/openrouting"
+FREEROUTING_JAR=""
+OUTPUT_DIR="$(mktemp -d)"
+
+# Parse args
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --freerouting)
+            FREEROUTING_JAR="$2"; shift 2 ;;
+        --help|-h)
+            head -10 "$0" | tail -9; exit 0 ;;
+        *)
+            echo "Unknown argument: $1" >&2; exit 1 ;;
+    esac
+done
+
+if [[ ! -x "$OPENROUTING" ]]; then
+    echo "openrouting binary not found at $OPENROUTING"
+    echo "Please run: cargo build --release"
+    exit 1
+fi
+
+# Benchmark DSN files: (filename, description)
+declare -a DSN_FILES=(
+    "dac2020_bm05.dsn"
+    "smoothieboard.dsn"
+)
+declare -A DSN_DESC=(
+    ["dac2020_bm05.dsn"]="DAC 2020 bm05 (audio codec board, 2 layers, 54 nets)"
+    ["smoothieboard.dsn"]="Smoothieboard v1.1 (5-driver CNC, 4 layers, 287 nets)"
+)
+
+# Pretty-print width
+COL_FILE=30
+COL_TOOL=12
+COL_TIME=12
+COL_ROUTED=14
+COL_UNROUTED=12
+
+print_header() {
+    printf "%-${COL_FILE}s  %-${COL_TOOL}s  %${COL_TIME}s  %${COL_ROUTED}s  %${COL_UNROUTED}s\n" \
+        "File" "Tool" "Wall time" "Nets routed" "Unrouted"
+    printf '%s\n' "$(printf '─%.0s' {1..90})"
+}
+
+print_row() {
+    printf "%-${COL_FILE}s  %-${COL_TOOL}s  %${COL_TIME}s  %${COL_ROUTED}s  %${COL_UNROUTED}s\n" \
+        "$1" "$2" "$3" "$4" "$5"
+}
+
+echo ""
+echo "========================================"
+echo "  openrouting Benchmark Suite"
+echo "========================================"
+echo ""
+
+print_header
+
+for dsn_file in "${DSN_FILES[@]}"; do
+    dsn_path="$SCRIPT_DIR/$dsn_file"
+    if [[ ! -f "$dsn_path" ]]; then
+        echo "  [SKIP] $dsn_file — file not found"
+        continue
+    fi
+
+    ses_path="$OUTPUT_DIR/$(basename "$dsn_file" .dsn).ses"
+
+    # ─── openrouting ─────────────────────────────────────────────
+    start=$(date +%s%3N)
+    stderr_out=$("$OPENROUTING" "$dsn_path" --output "$ses_path" 2>&1 || true)
+    end=$(date +%s%3N)
+    elapsed_ms=$(( end - start ))
+    elapsed_fmt="$(( elapsed_ms / 1000 )).$(printf '%03d' $(( elapsed_ms % 1000 )))s"
+
+    routed="?"
+    unrouted="?"
+    if echo "$stderr_out" | grep -qE "Routed [0-9]+ nets, [0-9]+ unrouted"; then
+        routed=$(echo "$stderr_out" | grep -oE "Routed [0-9]+" | grep -oE "[0-9]+")
+        unrouted=$(echo "$stderr_out" | grep -oE "[0-9]+ unrouted" | grep -oE "^[0-9]+")
+    fi
+
+    print_row "$dsn_file" "openrouting" "$elapsed_fmt" "$routed" "$unrouted"
+
+    # ─── freerouting (optional) ───────────────────────────────────
+    if [[ -n "$FREEROUTING_JAR" ]] && command -v java &>/dev/null; then
+        ses_fr="$OUTPUT_DIR/$(basename "$dsn_file" .dsn)_freerouting.ses"
+        start=$(date +%s%3N)
+        java_out=$(java -jar "$FREEROUTING_JAR" \
+            -de "$dsn_path" -do "$ses_fr" \
+            --gui.enabled=false --api_server.enabled=false \
+            -ll INFO 2>&1 || true)
+        end=$(date +%s%3N)
+        elapsed_ms=$(( end - start ))
+        elapsed_fmt="$(( elapsed_ms / 1000 )).$(printf '%03d' $(( elapsed_ms % 1000 )))s"
+
+        fr_unrouted="?"
+        if echo "$java_out" | grep -q "unrouted"; then
+            fr_unrouted=$(echo "$java_out" | grep -oE "[0-9]+ unrouted" | tail -1 | grep -oE "^[0-9]+")
+        fi
+
+        total_nets=$(grep -c "(net " "$dsn_path" || echo "?")
+        fr_routed=$(( total_nets - ${fr_unrouted:-0} ))
+
+        print_row "$dsn_file" "freerouting" "$elapsed_fmt" "$fr_routed" "$fr_unrouted"
+    fi
+done
+
+echo ""
+
+# Clean up temp output
+rm -rf "$OUTPUT_DIR"
+
+echo "Benchmarks complete."
+if [[ -z "$FREEROUTING_JAR" ]]; then
+    echo ""
+    echo "Tip: To compare against freerouting, pass --freerouting path/to/freerouting-executable.jar"
+fi
+echo ""
