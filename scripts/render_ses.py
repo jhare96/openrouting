@@ -22,6 +22,9 @@ from typing import Optional
 
 from PIL import Image, ImageDraw
 
+# Fallback board dimension (in design units) when no boundary is specified.
+DEFAULT_BOARD_EXTENT = 100_000.0
+
 
 # ─── S-expression parser ────────────────────────────────────────────────────
 
@@ -178,8 +181,8 @@ class BoardData:
         self.boundary_points: list[tuple[float, float]] = []
         self.min_x = 0.0
         self.min_y = 0.0
-        self.max_x = 100000.0
-        self.max_y = 100000.0
+        self.max_x = DEFAULT_BOARD_EXTENT
+        self.max_y = DEFAULT_BOARD_EXTENT
         self.layers: list[str] = []
         self.pads: list[dict] = []  # {x, y, shape, layer, ...}
         self.resolution_value = 1
@@ -643,8 +646,7 @@ class Renderer:
             px, py = self._to_px(pad["x"], pad["y"])
 
             if self.layer_filter and shape.get("layer") and shape["layer"] not in self.layer_filter:
-                if shape["layer"]:
-                    continue
+                continue
 
             if shape["type"] == "circle":
                 r = max(2, self._width_to_px(shape["diameter"]) // 2)
