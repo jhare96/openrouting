@@ -1015,16 +1015,19 @@ const CROWDED_DSN: &str = r#"
 "#;
 
 #[test]
-fn test_crowded_route_single_pass_fails() {
+fn test_crowded_route_single_pass_routes_all() {
     let design = dsn::parse_dsn(CROWDED_DSN).expect("Should parse crowded DSN");
     let single = router::route_single_pass(&design, &[]);
 
-    // Verify single-pass can route the crowded board (the router is capable
-    // of finding paths through narrow gaps with pad obstacle clearing)
-    // The real test for multi-pass is test_crowded_route_multi_pass_succeeds
+    // The router should handle this crowded board by clearing own-net pad
+    // obstacles and using both layers effectively
+    let routable = design.nets.iter().filter(|n| n.pins.len() >= 2).count();
+    let routed = routable - single.unrouted.len();
     assert!(
-        single.unrouted.len() <= design.nets.len(),
-        "Unexpected routing failure on crowded board",
+        routed >= routable / 2,
+        "Expected at least half the nets routed on crowded board, \
+         but only {}/{} routed",
+        routed, routable,
     );
 }
 

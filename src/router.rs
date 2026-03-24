@@ -452,9 +452,8 @@ pub fn route_single_pass(design: &DsnDesign, priority_nets: &[String]) -> Routin
     let trace_width = design.rules.trace_width.max(1);
     let clearance = design.rules.clearance.max(1);
 
-    // Grid size: use half the trace width or clearance for better resolution.
-    // This ensures at least 2 grid cells per trace width and per clearance,
-    // giving the router finer control over track placement.
+    // Grid size: use half the trace width or clearance for finer resolution.
+    // The +1 rounds up to avoid zero when trace_width or clearance is 1.
     let mut grid_size = (trace_width.max(clearance) + 1) / 2;
     // Ensure we don't make the grid too large
     let board_w = (design.boundary.max_x - design.boundary.min_x).max(1);
@@ -694,9 +693,10 @@ pub fn route_single_pass(design: &DsnDesign, priority_nets: &[String]) -> Routin
                     // Mark path as obstacle (circular clearance zone)
                     for state in &p {
                         routed_cells.insert((state.gx, state.gy, state.layer as usize));
+                        let clearance_r2 = clearance_cells * clearance_cells;
                         for dy in -clearance_cells..=clearance_cells {
                             for dx in -clearance_cells..=clearance_cells {
-                                if dx * dx + dy * dy <= clearance_cells * clearance_cells {
+                                if dx * dx + dy * dy <= clearance_r2 {
                                     let nx = state.gx as i64 + dx;
                                     let ny = state.gy as i64 + dy;
                                     if grid.in_bounds(nx, ny) {
