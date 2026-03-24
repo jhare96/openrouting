@@ -321,6 +321,28 @@ fn write_ses_tmp(
     (tmp, content)
 }
 
+/// Compute the routing area bounds: union of board boundary + all pad positions.
+/// Routed wires may extend beyond the board boundary to reach edge-mounted pads.
+fn routing_bounds(design: &dsn::DsnDesign) -> (i64, i64, i64, i64) {
+    let (mut min_x, mut min_y, mut max_x, mut max_y) = (
+        design.boundary.min_x,
+        design.boundary.min_y,
+        design.boundary.max_x,
+        design.boundary.max_y,
+    );
+    for net in &design.nets {
+        for pin in &net.pins {
+            if let Some((x, y, _)) = dsn::get_pad_position(design, &pin.component, &pin.pin) {
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x);
+                max_y = max_y.max(y);
+            }
+        }
+    }
+    (min_x, min_y, max_x, max_y)
+}
+
 // ─── Original tests ───────────────────────────────────────────────────────────
 
 #[test]
@@ -806,12 +828,12 @@ fn test_route_dac2020_benchmark() {
 
     let valid_layers = layer_names(&design);
     let valid_nets = net_names(&design);
-    let b = &design.boundary;
+    let (rb_min_x, rb_min_y, rb_max_x, rb_max_y) = routing_bounds(&design);
     let margin = design.rules.trace_width.max(design.rules.clearance) * 3;
 
-    // Should route at least some nets
-    let routed = design.nets.len() - result.unrouted.len();
-    assert!(routed > 0, "Expected at least one net routed on dac2020_bm05");
+    // Should route all nets
+    assert_eq!(result.unrouted.len(), 0,
+        "Expected all nets routed on dac2020_bm05; {} unrouted: {:?}", result.unrouted.len(), result.unrouted);
 
     for wire in &result.wires {
         assert!(wire.points.len() >= 2, "Wire segment needs >= 2 points");
@@ -819,14 +841,14 @@ fn test_route_dac2020_benchmark() {
         assert!(valid_nets.contains(&wire.net_name), "Unknown net: {}", wire.net_name);
         assert!(wire.width > 0, "Non-positive wire width");
         for &(x, y) in &wire.points {
-            assert!(x >= b.min_x - margin && x <= b.max_x + margin, "x={} out of bounds", x);
-            assert!(y >= b.min_y - margin && y <= b.max_y + margin, "y={} out of bounds", y);
+            assert!(x >= rb_min_x - margin && x <= rb_max_x + margin, "x={} out of bounds", x);
+            assert!(y >= rb_min_y - margin && y <= rb_max_y + margin, "y={} out of bounds", y);
         }
     }
     for via in &result.vias {
         assert!(valid_nets.contains(&via.net_name));
-        assert!(via.x >= b.min_x - margin && via.x <= b.max_x + margin);
-        assert!(via.y >= b.min_y - margin && via.y <= b.max_y + margin);
+        assert!(via.x >= rb_min_x - margin && via.x <= rb_max_x + margin);
+        assert!(via.y >= rb_min_y - margin && via.y <= rb_max_y + margin);
     }
     for name in &result.unrouted {
         assert!(valid_nets.contains(name), "Unrouted references unknown net: {}", name);
@@ -860,12 +882,12 @@ fn test_route_smoothieboard_benchmark() {
 
     let valid_layers = layer_names(&design);
     let valid_nets = net_names(&design);
-    let b = &design.boundary;
+    let (rb_min_x, rb_min_y, rb_max_x, rb_max_y) = routing_bounds(&design);
     let margin = design.rules.trace_width.max(design.rules.clearance) * 3;
 
-    // Should route a significant fraction of the 287 nets
-    let routed = design.nets.len() - result.unrouted.len();
-    assert!(routed > 50, "Expected > 50 nets routed on smoothieboard; got {}", routed);
+    // Should route all nets
+    assert_eq!(result.unrouted.len(), 0,
+        "Expected all nets routed on smoothieboard; {} unrouted: {:?}", result.unrouted.len(), result.unrouted);
 
     for wire in &result.wires {
         assert!(wire.points.len() >= 2, "Wire segment needs >= 2 points");
@@ -873,14 +895,14 @@ fn test_route_smoothieboard_benchmark() {
         assert!(valid_nets.contains(&wire.net_name), "Unknown net: {}", wire.net_name);
         assert!(wire.width > 0, "Non-positive wire width");
         for &(x, y) in &wire.points {
-            assert!(x >= b.min_x - margin && x <= b.max_x + margin, "x={} out of bounds", x);
-            assert!(y >= b.min_y - margin && y <= b.max_y + margin, "y={} out of bounds", y);
+            assert!(x >= rb_min_x - margin && x <= rb_max_x + margin, "x={} out of bounds", x);
+            assert!(y >= rb_min_y - margin && y <= rb_max_y + margin, "y={} out of bounds", y);
         }
     }
     for via in &result.vias {
         assert!(valid_nets.contains(&via.net_name));
-        assert!(via.x >= b.min_x - margin && via.x <= b.max_x + margin);
-        assert!(via.y >= b.min_y - margin && via.y <= b.max_y + margin);
+        assert!(via.x >= rb_min_x - margin && via.x <= rb_max_x + margin);
+        assert!(via.y >= rb_min_y - margin && via.y <= rb_max_y + margin);
     }
     for name in &result.unrouted {
         assert!(valid_nets.contains(name), "Unrouted references unknown net: {}", name);

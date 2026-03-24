@@ -234,6 +234,7 @@ fn bfs(
     signal_layers: &[usize],
     ws: &mut BfsWorkspace,
     heap: &mut BinaryHeap<Reverse<(u32, u32, State)>>,
+    via_cost: u32,
 ) -> Option<Vec<State>> {
     if start_cells.is_empty() || ws.target_indices.is_empty() {
         return None;
@@ -301,7 +302,7 @@ fn bfs(
             if grid.is_obstacle(other_layer, cur.gx as i64, cur.gy as i64) && !ws.target[ns_idx] {
                 continue;
             }
-            let new_g = g_cost + 100;
+            let new_g = g_cost + via_cost;
             if new_g < ws.get_dist(ns_idx) {
                 ws.set_dist_prev(ns_idx, new_g, cur_idx as u32);
                 let h = heuristic(cur.gx, cur.gy, tcx, tcy);
@@ -411,36 +412,177 @@ fn merge_collinear(pts: Vec<(i64, i64)>) -> Vec<(i64, i64)> {
 // ─── Main routing function ────────────────────────────────────────────────────
 
 /// Maximum number of rip-up-and-retry passes before giving up.
-const MAX_ROUTING_PASSES: usize = 10;
+const MAX_ROUTING_PASSES: usize = 20;
 
 pub fn route(design: &DsnDesign) -> RoutingResult {
-    // First pass: normal ordering (largest nets first)
-    let mut best = route_single_pass(design, &[]);
+    // Try multiple initial via costs to find the best starting point
+    let initial_via_costs = [50, 40, 60, 30, 70];
+    let mut best = route_single_pass_with_via_cost(design, &[], initial_via_costs[0]);
 
-    for pass in 1..MAX_ROUTING_PASSES {
+    for &vc in &initial_via_costs[1..] {
+        if best.unrouted.is_empty() {
+            break;
+        }
+        let candidate = route_single_pass_with_via_cost(design, &[], vc);
+        if candidate.unrouted.len() < best.unrouted.len() {
+            best = candidate;
+        }
+    }
+
+    // Phase 1: Standard rip-up-and-retry with spatial neighbors
+    let via_costs = [50, 40, 60, 30, 70, 20, 80, 45, 55, 35, 25, 65, 15, 75];
+    let mut stalled_count = 0;
+    for pass in 0..MAX_ROUTING_PASSES {
         if best.unrouted.is_empty() {
             break;
         }
 
-        // Re-route with previously-unrouted nets given priority
-        let priority_nets: Vec<String> = best.unrouted.clone();
+        let mut priority_nets: Vec<String> = best.unrouted.clone();
+        if stalled_count >= 1 {
+            let neighbor_nets = find_spatial_neighbors(design, &best.unrouted, stalled_count);
+            for n in &neighbor_nets {
+                if !priority_nets.contains(n) {
+                    priority_nets.push(n.clone());
+                }
+            }
+        }
+
+        let vc = via_costs[pass % via_costs.len()];
         eprintln!(
-            "Pass {}: {} unrouted net(s), retrying with priority: {}",
-            pass + 1,
+            "Pass {}: {} unrouted net(s), via_cost={}, retrying with {} priority nets",
+            pass + 2,
+            best.unrouted.len(),
+            vc,
             priority_nets.len(),
-            priority_nets.join(", "),
         );
-        let candidate = route_single_pass(design, &priority_nets);
+        let candidate = route_single_pass_with_via_cost(design, &priority_nets, vc);
 
         if candidate.unrouted.len() < best.unrouted.len() {
             best = candidate;
+            stalled_count = 0;
+        } else if candidate.unrouted.len() == best.unrouted.len()
+            && candidate.unrouted != best.unrouted
+        {
+            best = candidate;
+            stalled_count += 1;
         } else {
-            // No improvement – stop early
+            stalled_count += 1;
+        }
+
+        if stalled_count >= 4 {
             break;
         }
     }
 
+    // Phase 2: Transitive rip-up – discover the conflict chain.
+    // When nets A fail, route them first → nets B fail. Add B to priority.
+    // Route A+B first → nets C fail. Add C. Repeat until all route or we loop.
+    if !best.unrouted.is_empty() {
+        for vc in &via_costs {
+            if best.unrouted.is_empty() {
+                break;
+            }
+            let chain = build_conflict_chain(design, &best.unrouted, *vc);
+            if !chain.is_empty() {
+                eprintln!(
+                    "Transitive rip-up: {} conflict chain nets, via_cost={}",
+                    chain.len(),
+                    vc,
+                );
+                let candidate = route_single_pass_with_via_cost(design, &chain, *vc);
+                if candidate.unrouted.len() < best.unrouted.len() {
+                    best = candidate;
+                }
+                if best.unrouted.is_empty() {
+                    break;
+                }
+            }
+        }
+    }
+
     best
+}
+
+/// Build a transitive conflict chain: start with unrouted nets, route them first,
+/// collect any newly-unrouted nets, add them to the priority chain, repeat.
+fn build_conflict_chain(design: &DsnDesign, initial_unrouted: &[String], via_cost: u32) -> Vec<String> {
+    let mut chain: Vec<String> = initial_unrouted.to_vec();
+    let mut seen_sets: Vec<Vec<String>> = Vec::new();
+
+    for _iter in 0..10 {
+        let result = route_single_pass_with_via_cost(design, &chain, via_cost);
+        if result.unrouted.is_empty() {
+            return chain; // Found a working chain!
+        }
+        // Add newly-unrouted nets to the chain
+        let mut changed = false;
+        for net in &result.unrouted {
+            if !chain.contains(net) {
+                chain.push(net.clone());
+                changed = true;
+            }
+        }
+        if !changed {
+            // Same nets still unrouted – chain can't help
+            break;
+        }
+        // Check for cycles
+        let mut sorted_unrouted = result.unrouted.clone();
+        sorted_unrouted.sort();
+        if seen_sets.contains(&sorted_unrouted) {
+            break;
+        }
+        seen_sets.push(sorted_unrouted);
+    }
+
+    chain
+}
+
+/// Find nets whose pins are spatially close to the unrouted nets' pins.
+/// These "neighbor" nets are likely competing for the same routing channels.
+/// `radius_factor` controls how wide the search area is (increases each stall).
+fn find_spatial_neighbors(
+    design: &DsnDesign,
+    unrouted: &[String],
+    radius_factor: usize,
+) -> Vec<String> {
+    let trace_width = design.rules.trace_width.max(1);
+    let clearance = design.rules.clearance.max(1);
+    // Search radius: a few trace widths, expanding with each stall
+    let radius = (trace_width + clearance) * (5 + radius_factor as i64 * 3);
+
+    // Collect positions of all unrouted net pins
+    let mut unrouted_positions: Vec<(i64, i64)> = Vec::new();
+    for net in &design.nets {
+        if unrouted.contains(&net.name) {
+            for pin in &net.pins {
+                if let Some((x, y, _)) = crate::dsn::get_pad_position(design, &pin.component, &pin.pin) {
+                    unrouted_positions.push((x, y));
+                }
+            }
+        }
+    }
+
+    // Find other nets with pins near any unrouted pin
+    let mut neighbors: Vec<String> = Vec::new();
+    for net in &design.nets {
+        if unrouted.contains(&net.name) || neighbors.contains(&net.name) {
+            continue;
+        }
+        'pin_loop: for pin in &net.pins {
+            if let Some((x, y, _)) = crate::dsn::get_pad_position(design, &pin.component, &pin.pin) {
+                for &(ux, uy) in &unrouted_positions {
+                    let dist = ((x - ux).abs()).max((y - uy).abs());
+                    if dist <= radius {
+                        neighbors.push(net.name.clone());
+                        break 'pin_loop;
+                    }
+                }
+            }
+        }
+    }
+
+    neighbors
 }
 
 /// Run a single routing pass over the design.
@@ -449,23 +591,52 @@ pub fn route(design: &DsnDesign) -> RoutingResult {
 /// nets are routed in descending pin-count order (the same heuristic used by
 /// the original single-pass router).
 pub fn route_single_pass(design: &DsnDesign, priority_nets: &[String]) -> RoutingResult {
+    route_single_pass_with_via_cost(design, priority_nets, 50)
+}
+
+/// Run a single routing pass with a configurable via cost.
+fn route_single_pass_with_via_cost(design: &DsnDesign, priority_nets: &[String], via_cost: u32) -> RoutingResult {
     let trace_width = design.rules.trace_width.max(1);
     let clearance = design.rules.clearance.max(1);
+
+    // Compute the bounding box that covers ALL pad positions plus the board boundary.
+    // Some pads may be placed outside the board outline (e.g., edge connectors).
+    let (mut min_x, mut min_y, mut max_x, mut max_y) = (
+        design.boundary.min_x,
+        design.boundary.min_y,
+        design.boundary.max_x,
+        design.boundary.max_y,
+    );
+    for net in &design.nets {
+        for pin in &net.pins {
+            if let Some((x, y, _)) = crate::dsn::get_pad_position(design, &pin.component, &pin.pin) {
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x);
+                max_y = max_y.max(y);
+            }
+        }
+    }
+    // Add margin for clearance around edge pads
+    let margin = clearance * 2;
+    min_x -= margin;
+    min_y -= margin;
+    max_x += margin;
+    max_y += margin;
 
     // Grid size: use half the trace width or clearance for finer resolution.
     // The +1 rounds up to avoid zero when trace_width or clearance is 1.
     let mut grid_size = (trace_width.max(clearance) + 1) / 2;
-    // Ensure we don't make the grid too large
-    let board_w = (design.boundary.max_x - design.boundary.min_x).max(1);
-    let board_h = (design.boundary.max_y - design.boundary.min_y).max(1);
+    let board_w = (max_x - min_x).max(1);
+    let board_h = (max_y - min_y).max(1);
     // Cap at 1500x1500 cells (supports fine resolution on larger boards)
     while board_w / grid_size > 1500 || board_h / grid_size > 1500 {
         grid_size = (grid_size as f64 * 1.5) as i64;
     }
     grid_size = grid_size.max(1);
 
-    let offset_x = design.boundary.min_x;
-    let offset_y = design.boundary.min_y;
+    let offset_x = min_x;
+    let offset_y = min_y;
     let grid_w = ((board_w + grid_size - 1) / grid_size) as usize + 1;
     let grid_h = ((board_h + grid_size - 1) / grid_size) as usize + 1;
 
@@ -503,15 +674,24 @@ pub fn route_single_pass(design: &DsnDesign, priority_nets: &[String]) -> Routin
     // Build the priority set for O(1) lookups
     let priority_set: HashSet<&str> = priority_nets.iter().map(|s| s.as_str()).collect();
 
-    // Sort nets: priority nets first (by ascending pin count so small nets
-    // get first access to congested areas), then remaining nets also by
-    // ascending pin count. Routing small nets first prevents large high-fanout
-    // nets (like ground planes) from consuming channels that small nets need.
+    // Sort nets: priority nets first (in the order given), then remaining nets by
+    // descending pin count. Routing large nets first gives them access to more
+    // channels, while small 2-pin nets are more flexible and can route around.
     let mut sorted_nets: Vec<&crate::dsn::Net> = design.nets.iter().collect();
     sorted_nets.sort_by(|a, b| {
         let a_pri = priority_set.contains(a.name.as_str());
         let b_pri = priority_set.contains(b.name.as_str());
-        b_pri.cmp(&a_pri).then_with(|| a.pins.len().cmp(&b.pins.len()))
+        b_pri.cmp(&a_pri).then_with(|| {
+            if a_pri && b_pri {
+                // Among priority nets: preserve the order from priority_nets
+                let a_idx = priority_nets.iter().position(|n| n == &a.name).unwrap_or(usize::MAX);
+                let b_idx = priority_nets.iter().position(|n| n == &b.name).unwrap_or(usize::MAX);
+                a_idx.cmp(&b_idx)
+            } else {
+                // Non-priority: descending pin count (large nets first)
+                b.pins.len().cmp(&a.pins.len())
+            }
+        })
     });
 
     // For each net, gather pad positions and route between them
@@ -680,7 +860,7 @@ pub fn route_single_pass(design: &DsnDesign, priority_nets: &[String]) -> Routin
             }
 
             // A* search
-            let path = bfs(&grid, &start_cells, (tgx as i32, tgy as i32), &signal_layers, &mut ws, &mut heap);
+            let path = bfs(&grid, &start_cells, (tgx as i32, tgy as i32), &signal_layers, &mut ws, &mut heap, via_cost);
             ws.clear_targets();
 
             match path {
