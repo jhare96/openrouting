@@ -1,4 +1,4 @@
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{BinaryHeap, HashSet};
 use std::cmp::Reverse;
 
 use crate::dsn::{DsnDesign, PadShape, Side};
@@ -92,7 +92,102 @@ impl Grid {
     }
 }
 
-// ─── BFS maze router ──────────────────────────────────────────────────────────
+// ─── BFS workspace (flat arrays with generation counting) ─────────────────────
+
+/// Reusable workspace for BFS/A* searches. Uses flat arrays indexed by
+/// (layer * width * height + gy * width + gx) for O(1) lookups instead of
+/// HashMap. Generation counting avoids expensive array resets between searches.
+struct BfsWorkspace {
+    dist: Vec<u32>,
+    prev: Vec<u32>,
+    generation: Vec<u16>,
+    current_gen: u16,
+    target: Vec<bool>,
+    target_indices: Vec<usize>,
+    width: usize,
+    height: usize,
+}
+
+impl BfsWorkspace {
+    fn new(width: usize, height: usize, num_layers: usize) -> Self {
+        let size = width * height * num_layers;
+        BfsWorkspace {
+            dist: vec![u32::MAX; size],
+            prev: vec![u32::MAX; size],
+            generation: vec![0; size],
+            current_gen: 0,
+            target: vec![false; size],
+            target_indices: Vec::new(),
+            width,
+            height,
+        }
+    }
+
+    /// Increment generation to invalidate all previous dist/prev entries.
+    fn new_search(&mut self) {
+        self.current_gen = self.current_gen.wrapping_add(1);
+        if self.current_gen == 0 {
+            self.generation.fill(0);
+            self.current_gen = 1;
+        }
+    }
+
+    fn mark_target(&mut self, gx: i32, gy: i32, layer: usize) {
+        let idx = self.idx(gx, gy, layer);
+        if !self.target[idx] {
+            self.target[idx] = true;
+            self.target_indices.push(idx);
+        }
+    }
+
+    fn clear_targets(&mut self) {
+        for &idx in &self.target_indices {
+            self.target[idx] = false;
+        }
+        self.target_indices.clear();
+    }
+
+    #[inline(always)]
+    fn idx(&self, gx: i32, gy: i32, layer: usize) -> usize {
+        layer * self.width * self.height + (gy as usize) * self.width + (gx as usize)
+    }
+
+    #[inline(always)]
+    fn get_dist(&self, idx: usize) -> u32 {
+        if self.generation[idx] == self.current_gen {
+            self.dist[idx]
+        } else {
+            u32::MAX
+        }
+    }
+
+    #[inline(always)]
+    fn get_prev(&self, idx: usize) -> u32 {
+        if self.generation[idx] == self.current_gen {
+            self.prev[idx]
+        } else {
+            u32::MAX
+        }
+    }
+
+    #[inline(always)]
+    fn set_dist_prev(&mut self, idx: usize, dist: u32, prev: u32) {
+        self.dist[idx] = dist;
+        self.prev[idx] = prev;
+        self.generation[idx] = self.current_gen;
+    }
+
+    fn decode_index(&self, idx: usize) -> State {
+        let layer_size = self.width * self.height;
+        let layer = (idx / layer_size) as u8;
+        let rem = idx % layer_size;
+        let gy = (rem / self.width) as i32;
+        let gx = (rem % self.width) as i32;
+        State { gx, gy, layer }
+    }
+}
+
+// ─── A* maze router ──────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct State {
@@ -107,42 +202,59 @@ const DIRS: [(i32, i32); 8] = [
     (1, 1), (1, -1), (-1, 1), (-1, -1),
 ];
 
+/// Octile distance heuristic for A* (admissible with costs 10/14).
+#[inline(always)]
+fn heuristic(gx: i32, gy: i32, tcx: i32, tcy: i32) -> u32 {
+    let dx = (gx - tcx).unsigned_abs();
+    let dy = (gy - tcy).unsigned_abs();
+    let diag = dx.min(dy);
+    let straight = dx.max(dy) - diag;
+    straight * 10 + diag * 14
+}
+
 fn bfs(
     grid: &Grid,
-    start_cells: &[(i32, i32, usize)],   // (gx, gy, layer)
-    target_cells: &HashSet<(i32, i32, usize)>,
+    start_cells: &[(i32, i32, usize)],
+    target_center: (i32, i32),
     signal_layers: &[usize],
+    ws: &mut BfsWorkspace,
+    heap: &mut BinaryHeap<Reverse<(u32, u32, State)>>,
 ) -> Option<Vec<State>> {
-    if start_cells.is_empty() || target_cells.is_empty() {
+    if start_cells.is_empty() || ws.target_indices.is_empty() {
         return None;
     }
 
-    // Cost: move cost = 10, diagonal = 14, via = 100
-    let mut dist: HashMap<State, u32> = HashMap::new();
-    let mut prev: HashMap<State, State> = HashMap::new();
-    let mut heap: BinaryHeap<Reverse<(u32, State)>> = BinaryHeap::new();
+    heap.clear();
+    let (tcx, tcy) = target_center;
 
     for &(gx, gy, layer) in start_cells {
         let s = State { gx, gy, layer: layer as u8 };
-        dist.insert(s, 0);
-        heap.push(Reverse((0, s)));
+        let idx = ws.idx(gx, gy, layer);
+        ws.set_dist_prev(idx, 0, u32::MAX);
+        let h = heuristic(gx, gy, tcx, tcy);
+        heap.push(Reverse((h, 0, s)));
     }
 
-    while let Some(Reverse((cost, cur))) = heap.pop() {
-        if target_cells.contains(&(cur.gx, cur.gy, cur.layer as usize)) {
-            // Backtrack
+    while let Some(Reverse((_f_cost, g_cost, cur))) = heap.pop() {
+        let cur_idx = ws.idx(cur.gx, cur.gy, cur.layer as usize);
+
+        // Skip stale heap entries (a shorter path was already found)
+        if ws.get_dist(cur_idx) < g_cost {
+            continue;
+        }
+
+        if ws.target[cur_idx] {
+            // Backtrack path
             let mut path = vec![cur];
-            let mut node = cur;
-            while let Some(&p) = prev.get(&node) {
-                path.push(p);
-                node = p;
+            let mut idx = cur_idx;
+            loop {
+                let p = ws.get_prev(idx);
+                if p == u32::MAX { break; }
+                path.push(ws.decode_index(p as usize));
+                idx = p as usize;
             }
             path.reverse();
             return Some(path);
-        }
-
-        if dist.get(&cur).copied().unwrap_or(u32::MAX) < cost {
-            continue;
         }
 
         // Moves on same layer
@@ -152,20 +264,16 @@ fn bfs(
             if !grid.in_bounds(nx as i64, ny as i64) {
                 continue;
             }
-            if grid.is_obstacle(cur.layer as usize, nx as i64, ny as i64) {
-                // Allow if this is a target cell
-                let is_target = target_cells.contains(&(nx, ny, cur.layer as usize));
-                if !is_target {
-                    continue;
-                }
+            let ns_idx = ws.idx(nx, ny, cur.layer as usize);
+            if grid.is_obstacle(cur.layer as usize, nx as i64, ny as i64) && !ws.target[ns_idx] {
+                continue;
             }
             let move_cost = if dx != 0 && dy != 0 { 14u32 } else { 10u32 };
-            let next_cost = cost + move_cost;
-            let ns = State { gx: nx, gy: ny, layer: cur.layer };
-            if next_cost < dist.get(&ns).copied().unwrap_or(u32::MAX) {
-                dist.insert(ns, next_cost);
-                prev.insert(ns, cur);
-                heap.push(Reverse((next_cost, ns)));
+            let new_g = g_cost + move_cost;
+            if new_g < ws.get_dist(ns_idx) {
+                ws.set_dist_prev(ns_idx, new_g, cur_idx as u32);
+                let h = heuristic(nx, ny, tcx, tcy);
+                heap.push(Reverse((new_g + h, new_g, State { gx: nx, gy: ny, layer: cur.layer })));
             }
         }
 
@@ -174,19 +282,15 @@ fn bfs(
             if other_layer == cur.layer as usize {
                 continue;
             }
-            if grid.is_obstacle(other_layer, cur.gx as i64, cur.gy as i64) {
-                let is_target = target_cells.contains(&(cur.gx, cur.gy, other_layer));
-                if !is_target {
-                    continue;
-                }
+            let ns_idx = ws.idx(cur.gx, cur.gy, other_layer);
+            if grid.is_obstacle(other_layer, cur.gx as i64, cur.gy as i64) && !ws.target[ns_idx] {
+                continue;
             }
-            let via_cost = 100u32;
-            let next_cost = cost + via_cost;
-            let ns = State { gx: cur.gx, gy: cur.gy, layer: other_layer as u8 };
-            if next_cost < dist.get(&ns).copied().unwrap_or(u32::MAX) {
-                dist.insert(ns, next_cost);
-                prev.insert(ns, cur);
-                heap.push(Reverse((next_cost, ns)));
+            let new_g = g_cost + 100;
+            if new_g < ws.get_dist(ns_idx) {
+                ws.set_dist_prev(ns_idx, new_g, cur_idx as u32);
+                let h = heuristic(cur.gx, cur.gy, tcx, tcy);
+                heap.push(Reverse((new_g + h, new_g, State { gx: cur.gx, gy: cur.gy, layer: other_layer as u8 })));
             }
         }
     }
@@ -332,6 +436,10 @@ pub fn route(design: &DsnDesign) -> RoutingResult {
     let trace_cells = (trace_width / grid_size / 2).max(0);
     let pad_radius_cells = clearance_cells + trace_cells;
 
+    // Reusable BFS workspace and heap (avoids per-search allocations)
+    let mut ws = BfsWorkspace::new(grid_w, grid_h, num_layers);
+    let mut heap: BinaryHeap<Reverse<(u32, u32, State)>> = BinaryHeap::new();
+
     let mut result = RoutingResult {
         wires: Vec::new(),
         vias: Vec::new(),
@@ -384,24 +492,25 @@ pub fn route(design: &DsnDesign) -> RoutingResult {
             // Build start cells from already-routed positions
             let start_cells: Vec<(i32, i32, usize)> = routed_cells.iter().copied().collect();
 
-            // Target: a small area around the target pad on the target layer
-            let mut target_cells: HashSet<(i32, i32, usize)> = HashSet::new();
+            // Target: a small area around the target pad on all signal layers
+            ws.new_search();
             for dy in -pad_radius_cells..=pad_radius_cells {
                 for dx in -pad_radius_cells..=pad_radius_cells {
                     let nx = tgx + dx;
                     let ny = tgy + dy;
                     if grid.in_bounds(nx, ny) {
-                        target_cells.insert((nx as i32, ny as i32, target_layer));
+                        ws.mark_target(nx as i32, ny as i32, target_layer);
                         // Also accept on any signal layer (via)
                         for &sl in &signal_layers {
-                            target_cells.insert((nx as i32, ny as i32, sl));
+                            ws.mark_target(nx as i32, ny as i32, sl);
                         }
                     }
                 }
             }
 
-            // BFS
-            let path = bfs(&grid, &start_cells, &target_cells, &signal_layers);
+            // A* search
+            let path = bfs(&grid, &start_cells, (tgx as i32, tgy as i32), &signal_layers, &mut ws, &mut heap);
+            ws.clear_targets();
 
             match path {
                 Some(p) => {
