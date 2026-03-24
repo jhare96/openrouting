@@ -935,6 +935,56 @@ fn test_wire_segments_continuous() {
     }
 }
 
+// ─── Multi-pass rip-up-and-retry test ─────────────────────────────────────────
+
+/// Verify that multi-pass rip-up-and-retry routes more nets than a single pass
+/// on the real smoothieboard benchmark. This board has densely-packed IC pins
+/// that cause ordering-dependent congestion: nets routed early claim narrow
+/// channels between pins, blocking nets routed later. Multi-pass re-prioritises
+/// the failed nets so they get first access to the congested channels on a
+/// subsequent pass.
+#[test]
+fn test_multi_pass_improves_on_crowded_benchmark() {
+    let dsn_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("benchmarks")
+        .join("smoothieboard.dsn");
+    if !dsn_path.exists() {
+        eprintln!("Skipping benchmark test: {} not found", dsn_path.display());
+        return;
+    }
+    let content = std::fs::read_to_string(&dsn_path).expect("read DSN");
+    let design = dsn::parse_dsn(&content).expect("parse DSN");
+
+    let single = router::route_single_pass(&design, &[]);
+    let multi = router::route(&design);
+
+    let single_routed = design.nets.len() - single.unrouted.len();
+    let multi_routed = design.nets.len() - multi.unrouted.len();
+
+    // Single pass must leave at least some nets unrouted on this dense board
+    assert!(
+        !single.unrouted.is_empty(),
+        "Expected single-pass to leave at least one net unrouted on smoothieboard, \
+         but all {} nets were routed",
+        design.nets.len(),
+    );
+
+    // Multi-pass must route strictly more nets than single-pass
+    assert!(
+        multi_routed > single_routed,
+        "Expected multi-pass to route more nets than single-pass; \
+         single={}, multi={}",
+        single_routed, multi_routed,
+    );
+
+    // Multi-pass should not regress: at least as many nets as single-pass
+    assert!(
+        multi.unrouted.len() <= single.unrouted.len(),
+        "Multi-pass should not regress; single unrouted={}, multi unrouted={}",
+        single.unrouted.len(), multi.unrouted.len(),
+    );
+}
+
 // ─── No duplicate wires ──────────────────────────────────────────────────────
 
 #[test]

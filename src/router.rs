@@ -433,7 +433,7 @@ pub fn route(design: &DsnDesign) -> RoutingResult {
 /// Nets whose names appear in `priority_nets` are routed first; the remaining
 /// nets are routed in descending pin-count order (the same heuristic used by
 /// the original single-pass router).
-fn route_single_pass(design: &DsnDesign, priority_nets: &[String]) -> RoutingResult {
+pub fn route_single_pass(design: &DsnDesign, priority_nets: &[String]) -> RoutingResult {
     let trace_width = design.rules.trace_width.max(1);
     let clearance = design.rules.clearance.max(1);
 
