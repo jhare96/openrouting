@@ -93,22 +93,32 @@ fn parse_items(chars: &mut Peekable) -> Result<Vec<Sexp>, String> {
                 items.push(Sexp::List(children));
             }
             Some('"') => {
-                chars.next(); // consume opening '"'
-                let mut s = String::new();
-                loop {
-                    match chars.next() {
-                        None => return Err("Unterminated string literal".to_string()),
-                        Some('"') => break,
-                        Some('\\') => {
-                            match chars.next() {
-                                Some(c) => s.push(c),
-                                None => return Err("Unterminated escape in string".to_string()),
+                // Peek ahead: if `"` is immediately followed by `)` or whitespace, treat
+                // it as the atom `"` (handles the Specctra `(string_quote ")` convention).
+                let mut lookahead = chars.clone();
+                lookahead.next(); // consume '"'
+                let next_ch = lookahead.peek().copied();
+                if next_ch == Some(')') || next_ch.map(|c| c.is_whitespace()).unwrap_or(true) {
+                    chars.next(); // consume the '"'
+                    items.push(Sexp::Atom("\"".to_string()));
+                } else {
+                    chars.next(); // consume opening '"'
+                    let mut s = String::new();
+                    loop {
+                        match chars.next() {
+                            None => return Err("Unterminated string literal".to_string()),
+                            Some('"') => break,
+                            Some('\\') => {
+                                match chars.next() {
+                                    Some(c) => s.push(c),
+                                    None => return Err("Unterminated escape in string".to_string()),
+                                }
                             }
+                            Some(c) => s.push(c),
                         }
-                        Some(c) => s.push(c),
                     }
+                    items.push(Sexp::Atom(s));
                 }
-                items.push(Sexp::Atom(s));
             }
             _ => {
                 let mut atom = String::new();
@@ -171,5 +181,18 @@ mod tests {
     fn test_comment_slash() {
         let s = Sexp::parse("// comment\n(foo bar)").unwrap();
         assert_eq!(s.name(), Some("foo"));
+    }
+
+    #[test]
+    fn test_string_quote_directive() {
+        // Specctra DSN files contain `(string_quote ")` where `"` is the value, not a string opener.
+        let s = Sexp::parse("(parser (string_quote \") (host_cad \"KiCad\"))").unwrap();
+        let sq = s.find("string_quote").unwrap();
+        let items = sq.as_list().unwrap();
+        assert_eq!(items[1].as_atom(), Some("\""),
+            "string_quote value should be a bare dquote atom");
+        let hc = s.find("host_cad").unwrap();
+        let hc_items = hc.as_list().unwrap();
+        assert_eq!(hc_items[1].as_atom(), Some("KiCad"));
     }
 }
