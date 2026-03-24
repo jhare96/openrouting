@@ -414,6 +414,10 @@ fn merge_collinear(pts: Vec<(i64, i64)>) -> Vec<(i64, i64)> {
 /// Maximum number of rip-up-and-retry passes before giving up.
 const MAX_ROUTING_PASSES: usize = 20;
 
+/// Maximum grid dimension (width or height) in cells. Limits memory usage
+/// while still allowing fine resolution for most board sizes.
+const MAX_GRID_DIM: i64 = 1500;
+
 pub fn route(design: &DsnDesign) -> RoutingResult {
     // Try multiple initial via costs to find the best starting point
     let initial_via_costs = [50, 40, 60, 30, 70];
@@ -625,12 +629,13 @@ fn route_single_pass_with_via_cost(design: &DsnDesign, priority_nets: &[String],
     max_y += margin;
 
     // Grid size: use half the trace width or clearance for finer resolution.
-    // The +1 rounds up to avoid zero when trace_width or clearance is 1.
+    // The +1 ensures the result is at least 1 even when both values are 1
+    // (integer division of 2/2 would give 1, but 1/2 would give 0 without it).
     let mut grid_size = (trace_width.max(clearance) + 1) / 2;
     let board_w = (max_x - min_x).max(1);
     let board_h = (max_y - min_y).max(1);
-    // Cap at 1500x1500 cells (supports fine resolution on larger boards)
-    while board_w / grid_size > 1500 || board_h / grid_size > 1500 {
+    // Increase grid_size until the grid fits within MAX_GRID_DIM cells per axis
+    while board_w / grid_size > MAX_GRID_DIM || board_h / grid_size > MAX_GRID_DIM {
         grid_size = (grid_size as f64 * 1.5) as i64;
     }
     grid_size = grid_size.max(1);

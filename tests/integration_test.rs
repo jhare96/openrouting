@@ -968,7 +968,7 @@ fn test_wire_segments_continuous() {
 /// In single-pass, the CAN nets (3 pins) route first by ascending pin-count
 /// and claim the gap. The MUST nets route after but some find the gap blocked.
 ///
-/// Multi-pass re-prioritises the failed MUST net(s), giving them first access
+/// Multi-pass reprioritizes the failed MUST net(s), giving them first access
 /// to the gap. The CAN nets can route around the wall instead. All nets succeed.
 const CROWDED_DSN: &str = r#"
 (pcb "crowded_board"
