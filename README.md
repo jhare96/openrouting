@@ -1,6 +1,9 @@
 # openrouting
 An open source PCB auto routing tool
 
+## WARNING
+This is 100% AI Generated code, exercise with caution.
+
 ## Usage
 
 ```bash
