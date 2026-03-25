@@ -452,6 +452,7 @@ pub fn route(design: &DsnDesign) -> RoutingResult {
         }
 
         let vc = via_costs[pass % via_costs.len()];
+        #[cfg(feature = "verbose")]
         eprintln!(
             "Pass {}: {} unrouted net(s), via_cost={}, retrying with {} priority nets",
             pass + 2,
@@ -488,6 +489,7 @@ pub fn route(design: &DsnDesign) -> RoutingResult {
             }
             let chain = build_conflict_chain(design, &best.unrouted, *vc);
             if !chain.is_empty() {
+                #[cfg(feature = "verbose")]
                 eprintln!(
                     "Transitive rip-up: {} conflict chain nets, via_cost={}",
                     chain.len(),
@@ -741,24 +743,7 @@ fn route_single_pass_with_via_cost(design: &DsnDesign, priority_nets: &[String],
                 let pin = image.pins.iter().find(|p| p.pin_number == pin_ref.pin)?;
                 let padstack = design.padstacks.get(&pin.padstack_name)?;
 
-                let pad_radius = padstack.shapes.first()
-                    .map(|shape| match shape {
-                        PadShape::Circle { diameter, .. } => diameter / 2 / grid_size + clearance_cells,
-                        PadShape::Rect { x1, y1, x2, y2, .. } => {
-                            let w = (x2 - x1).abs();
-                            let h = (y2 - y1).abs();
-                            w.max(h) / 2 / grid_size + clearance_cells
-                        }
-                        PadShape::Oval { width, height, .. } => {
-                            width.max(height) / 2 / grid_size + clearance_cells
-                        }
-                        PadShape::Path { width, .. } => width / 2 / grid_size + clearance_cells,
-                        PadShape::Polygon { points, .. } => {
-                            let max_extent = points.iter().map(|p| p.x.abs().max(p.y.abs())).max().unwrap_or(0);
-                            max_extent / grid_size + clearance_cells
-                        }
-                    })
-                    .unwrap_or(clearance_cells + 1);
+                let pad_radius = max_pad_radius(&padstack.shapes, grid_size, clearance_cells);
 
                 // Determine which layers this pad exists on
                 let mut layers = Vec::new();
@@ -795,17 +780,6 @@ fn route_single_pass_with_via_cost(design: &DsnDesign, priority_nets: &[String],
             }
         }
 
-        if valid_pads.len() < 2 {
-            result.unrouted.push(net.name.clone());
-            // Restore pad obstacles since this net wasn't routed
-            for &(gx, gy, ref layers, r) in &net_pad_obstacles {
-                for &layer in layers {
-                    grid.mark_circle(layer, gx, gy, r);
-                }
-            }
-            continue;
-        }
-
         // Determine which pads are through-hole (multi-layer)
         let pad_is_through_hole: Vec<bool> = net
             .pins
@@ -816,8 +790,20 @@ fn route_single_pass_with_via_cost(design: &DsnDesign, priority_nets: &[String],
                     let image = design.images.get(&c.image_name)?;
                     let pin = image.pins.iter().find(|p| p.pin_number == pin_ref.pin)?;
                     let ps = design.padstacks.get(&pin.padstack_name)?;
-                    // Through-hole if pad has shapes on more than one layer
-                    Some(ps.shapes.len() > 1)
+                    // Through-hole if pad has shapes on more than one layer,
+                    // or if it has a single shape on the special "*.Cu" layer (all copper layers).
+                    let multi_layer = ps.shapes.len() > 1;
+                    let wildcard_cu = ps.shapes.iter().any(|shape| {
+                        let layer_name = match shape {
+                            PadShape::Circle { layer, .. } => layer.as_str(),
+                            PadShape::Rect { layer, .. } => layer.as_str(),
+                            PadShape::Oval { layer, .. } => layer.as_str(),
+                            PadShape::Polygon { layer, .. } => layer.as_str(),
+                            PadShape::Path { layer, .. } => layer.as_str(),
+                        };
+                        layer_name == "*.Cu"
+                    });
+                    Some(multi_layer || wildcard_cu)
                 });
                 is_th.unwrap_or(false)
             })
@@ -936,6 +922,30 @@ fn layer_index(design: &DsnDesign, layer_name: &str, signal_layers: &[usize]) ->
     signal_layers.first().copied().unwrap_or(0)
 }
 
+/// Compute the maximum obstacle radius (in grid cells) across all shapes in a padstack.
+fn max_pad_radius(shapes: &[PadShape], grid_size: i64, clearance_cells: i64) -> i64 {
+    shapes
+        .iter()
+        .map(|shape| match shape {
+            PadShape::Circle { diameter, .. } => diameter / 2 / grid_size + clearance_cells,
+            PadShape::Rect { x1, y1, x2, y2, .. } => {
+                let w = (x2 - x1).abs();
+                let h = (y2 - y1).abs();
+                w.max(h) / 2 / grid_size + clearance_cells
+            }
+            PadShape::Oval { width, height, .. } => {
+                width.max(height) / 2 / grid_size + clearance_cells
+            }
+            PadShape::Path { width, .. } => width / 2 / grid_size + clearance_cells,
+            PadShape::Polygon { points, .. } => {
+                let max_extent = points.iter().map(|p| p.x.abs().max(p.y.abs())).max().unwrap_or(0);
+                max_extent / grid_size + clearance_cells
+            }
+        })
+        .max()
+        .unwrap_or(clearance_cells + 1)
+}
+
 fn mark_pads(grid: &mut Grid, design: &DsnDesign, signal_layers: &[usize], clearance: i64) {
     let grid_size = grid.grid_size;
     let clearance_cells = (clearance / grid_size).max(1);
@@ -960,26 +970,10 @@ fn mark_pads(grid: &mut Grid, design: &DsnDesign, signal_layers: &[usize], clear
 
                 let (gx, gy) = grid.dsn_to_grid(abs_x, abs_y);
 
-                // Determine pad size from padstack (use max across all shapes)
+                // Determine pad size from padstack (max across all shapes)
                 let padstack = design.padstacks.get(&pin.padstack_name);
                 let pad_radius = padstack
-                    .and_then(|ps| ps.shapes.first())
-                    .map(|shape| match shape {
-                        PadShape::Circle { diameter, .. } => diameter / 2 / grid_size + clearance_cells,
-                        PadShape::Rect { x1, y1, x2, y2, .. } => {
-                            let w = (x2 - x1).abs();
-                            let h = (y2 - y1).abs();
-                            w.max(h) / 2 / grid_size + clearance_cells
-                        }
-                        PadShape::Oval { width, height, .. } => {
-                            width.max(height) / 2 / grid_size + clearance_cells
-                        }
-                        PadShape::Path { width, .. } => width / 2 / grid_size + clearance_cells,
-                        PadShape::Polygon { points, .. } => {
-                            let max_extent = points.iter().map(|p| p.x.abs().max(p.y.abs())).max().unwrap_or(0);
-                            max_extent / grid_size + clearance_cells
-                        }
-                    })
+                    .map(|ps| max_pad_radius(&ps.shapes, grid_size, clearance_cells))
                     .unwrap_or(clearance_cells + 1);
 
                 // Mark obstacles on each layer where the pad has a shape.

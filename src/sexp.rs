@@ -131,10 +131,11 @@ fn parse_items(chars: &mut Peekable) -> Result<Vec<Sexp>, String> {
                             // Preserve the quotes so downstream parsers can detect the boundary.
                             chars.next(); // consume opening '"'
                             atom.push('"');
+                            let mut terminated = false;
                             loop {
                                 match chars.next() {
                                     None => break,
-                                    Some('"') => { atom.push('"'); break; }
+                                    Some('"') => { atom.push('"'); terminated = true; break; }
                                     Some('\\') => {
                                         if let Some(c) = chars.next() {
                                             atom.push(c);
@@ -142,6 +143,9 @@ fn parse_items(chars: &mut Peekable) -> Result<Vec<Sexp>, String> {
                                     }
                                     Some(c) => atom.push(c),
                                 }
+                            }
+                            if !terminated {
+                                return Err(format!("Unterminated embedded quote in atom: {}", atom));
                             }
                         }
                         Some(c) => {

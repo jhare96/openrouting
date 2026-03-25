@@ -965,8 +965,8 @@ fn test_wire_segments_continuous() {
 /// x=30000 with a very narrow gap. Three 3-pin "CAN" nets and three
 /// 2-pin "MUST" nets all need to cross the wall through this gap.
 ///
-/// In single-pass, the CAN nets (3 pins) route first by ascending pin-count
-/// and claim the gap. The MUST nets route after but some find the gap blocked.
+/// In single-pass, the non-priority nets are ordered by descending pin-count:
+/// the 3-pin CAN nets route before the 2-pin MUST nets and claim the gap.
 ///
 /// Multi-pass reprioritizes the failed MUST net(s), giving them first access
 /// to the gap. The CAN nets can route around the wall instead. All nets succeed.
@@ -1037,7 +1037,7 @@ const CROWDED_DSN: &str = r#"
 "#;
 
 #[test]
-fn test_crowded_route_single_pass_routes_all() {
+fn test_crowded_route_single_pass_routes_most() {
     let design = dsn::parse_dsn(CROWDED_DSN).expect("Should parse crowded DSN");
     let single = router::route_single_pass(&design, &[]);
 

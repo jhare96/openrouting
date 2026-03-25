@@ -3,5 +3,8 @@ name = "openrouting"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+verbose = []
+
 [dependencies]
 clap = { version = "4.6", features = ["derive"] }
