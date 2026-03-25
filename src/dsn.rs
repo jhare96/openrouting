@@ -141,10 +141,10 @@ fn parse_f64(s: &Sexp) -> f64 {
 }
 
 /// Parse the `"COMP"-"PIN"` or `COMP-PIN` or `"COMP-PIN"` pin-reference formats.
+/// Also handles `COMP-"PIN"` where the pin name is quoted (e.g. `X14-"D-"`).
 fn parse_pin_ref(token: &str) -> PinRef {
     // Try split on the last '-' that is preceded by a closing quote or a word char
-    // Typical patterns: R1-1  "R1"-"1"  "R1-1"
-    // We strip surrounding quotes first, then split on '-'
+    // Typical patterns: R1-1  "R1"-"1"  "R1-1"  X14-"D-"  RJ1-"Y-"
     let stripped = token.trim_matches('"');
 
     // Check if there's a `"-"` separator pattern
@@ -155,10 +155,34 @@ fn parse_pin_ref(token: &str) -> PinRef {
         return PinRef { component: comp, pin };
     }
 
-    // Plain dash split
+    // Check for COMP-"PIN" format (pin name is quoted, may contain dashes)
+    // e.g., X14-"D-" → component=X14, pin=D-
+    if let Some(idx) = stripped.find("-\"") {
+        let comp = stripped[..idx].to_string();
+        let pin = stripped[idx + 1..].trim_matches('"').to_string();
+        if !comp.is_empty() && !pin.is_empty() {
+            return PinRef { component: comp, pin };
+        }
+    }
+
+    // Plain dash split (try last dash first, fall back to first dash if pin is empty)
     if let Some(pos) = stripped.rfind('-') {
         let comp = stripped[..pos].to_string();
         let pin = stripped[pos + 1..].to_string();
+        if !pin.is_empty() {
+            return PinRef { component: comp, pin };
+        }
+        // rfind gave empty pin (e.g., "C60--" where pin is "-").
+        // Fall back to first dash as separator.
+        if let Some(fpos) = stripped.find('-') {
+            if fpos < pos {
+                let comp = stripped[..fpos].to_string();
+                let pin = stripped[fpos + 1..].to_string();
+                if !comp.is_empty() && !pin.is_empty() {
+                    return PinRef { component: comp, pin };
+                }
+            }
+        }
         PinRef { component: comp, pin }
     } else {
         PinRef {
@@ -427,10 +451,17 @@ fn parse_rule(node: &Sexp) -> DesignRule {
                     }
             }
             Some("clearance") => {
-                if let Some(items) = item.as_list()
-                    && let Some(v) = items.get(1) {
-                        clearance = parse_i64(v);
+                // Only use the default clearance (no "type" specifier).
+                // Entries like (clearance 50 (type smd_smd)) are type-specific
+                // overrides that shouldn't replace the general clearance.
+                if let Some(items) = item.as_list() {
+                    let has_type = items.iter().any(|child| child.name() == Some("type"));
+                    if !has_type {
+                        if let Some(v) = items.get(1) {
+                            clearance = parse_i64(v);
+                        }
                     }
+                }
             }
             _ => {}
         }

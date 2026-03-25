@@ -321,6 +321,28 @@ fn write_ses_tmp(
     (tmp, content)
 }
 
+/// Compute the routing area bounds: union of board boundary + all pad positions.
+/// Routed wires may extend beyond the board boundary to reach edge-mounted pads.
+fn routing_bounds(design: &dsn::DsnDesign) -> (i64, i64, i64, i64) {
+    let (mut min_x, mut min_y, mut max_x, mut max_y) = (
+        design.boundary.min_x,
+        design.boundary.min_y,
+        design.boundary.max_x,
+        design.boundary.max_y,
+    );
+    for net in &design.nets {
+        for pin in &net.pins {
+            if let Some((x, y, _)) = dsn::get_pad_position(design, &pin.component, &pin.pin) {
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x);
+                max_y = max_y.max(y);
+            }
+        }
+    }
+    (min_x, min_y, max_x, max_y)
+}
+
 // ─── Original tests ───────────────────────────────────────────────────────────
 
 #[test]
@@ -806,12 +828,12 @@ fn test_route_dac2020_benchmark() {
 
     let valid_layers = layer_names(&design);
     let valid_nets = net_names(&design);
-    let b = &design.boundary;
+    let (rb_min_x, rb_min_y, rb_max_x, rb_max_y) = routing_bounds(&design);
     let margin = design.rules.trace_width.max(design.rules.clearance) * 3;
 
-    // Should route at least some nets
-    let routed = design.nets.len() - result.unrouted.len();
-    assert!(routed > 0, "Expected at least one net routed on dac2020_bm05");
+    // Should route all nets
+    assert_eq!(result.unrouted.len(), 0,
+        "Expected all nets routed on dac2020_bm05; {} unrouted: {:?}", result.unrouted.len(), result.unrouted);
 
     for wire in &result.wires {
         assert!(wire.points.len() >= 2, "Wire segment needs >= 2 points");
@@ -819,14 +841,14 @@ fn test_route_dac2020_benchmark() {
         assert!(valid_nets.contains(&wire.net_name), "Unknown net: {}", wire.net_name);
         assert!(wire.width > 0, "Non-positive wire width");
         for &(x, y) in &wire.points {
-            assert!(x >= b.min_x - margin && x <= b.max_x + margin, "x={} out of bounds", x);
-            assert!(y >= b.min_y - margin && y <= b.max_y + margin, "y={} out of bounds", y);
+            assert!(x >= rb_min_x - margin && x <= rb_max_x + margin, "x={} out of bounds", x);
+            assert!(y >= rb_min_y - margin && y <= rb_max_y + margin, "y={} out of bounds", y);
         }
     }
     for via in &result.vias {
         assert!(valid_nets.contains(&via.net_name));
-        assert!(via.x >= b.min_x - margin && via.x <= b.max_x + margin);
-        assert!(via.y >= b.min_y - margin && via.y <= b.max_y + margin);
+        assert!(via.x >= rb_min_x - margin && via.x <= rb_max_x + margin);
+        assert!(via.y >= rb_min_y - margin && via.y <= rb_max_y + margin);
     }
     for name in &result.unrouted {
         assert!(valid_nets.contains(name), "Unrouted references unknown net: {}", name);
@@ -860,12 +882,12 @@ fn test_route_smoothieboard_benchmark() {
 
     let valid_layers = layer_names(&design);
     let valid_nets = net_names(&design);
-    let b = &design.boundary;
+    let (rb_min_x, rb_min_y, rb_max_x, rb_max_y) = routing_bounds(&design);
     let margin = design.rules.trace_width.max(design.rules.clearance) * 3;
 
-    // Should route a significant fraction of the 287 nets
-    let routed = design.nets.len() - result.unrouted.len();
-    assert!(routed > 50, "Expected > 50 nets routed on smoothieboard; got {}", routed);
+    // Should route all nets
+    assert_eq!(result.unrouted.len(), 0,
+        "Expected all nets routed on smoothieboard; {} unrouted: {:?}", result.unrouted.len(), result.unrouted);
 
     for wire in &result.wires {
         assert!(wire.points.len() >= 2, "Wire segment needs >= 2 points");
@@ -873,14 +895,14 @@ fn test_route_smoothieboard_benchmark() {
         assert!(valid_nets.contains(&wire.net_name), "Unknown net: {}", wire.net_name);
         assert!(wire.width > 0, "Non-positive wire width");
         for &(x, y) in &wire.points {
-            assert!(x >= b.min_x - margin && x <= b.max_x + margin, "x={} out of bounds", x);
-            assert!(y >= b.min_y - margin && y <= b.max_y + margin, "y={} out of bounds", y);
+            assert!(x >= rb_min_x - margin && x <= rb_max_x + margin, "x={} out of bounds", x);
+            assert!(y >= rb_min_y - margin && y <= rb_max_y + margin, "y={} out of bounds", y);
         }
     }
     for via in &result.vias {
         assert!(valid_nets.contains(&via.net_name));
-        assert!(via.x >= b.min_x - margin && via.x <= b.max_x + margin);
-        assert!(via.y >= b.min_y - margin && via.y <= b.max_y + margin);
+        assert!(via.x >= rb_min_x - margin && via.x <= rb_max_x + margin);
+        assert!(via.y >= rb_min_y - margin && via.y <= rb_max_y + margin);
     }
     for name in &result.unrouted {
         assert!(valid_nets.contains(name), "Unrouted references unknown net: {}", name);
@@ -933,6 +955,116 @@ fn test_wire_segments_continuous() {
         }
         // If they're on different layers the gap is bridged by a via (tested in via tests)
     }
+}
+
+// ─── Multi-pass rip-up-and-retry test ─────────────────────────────────────────
+
+/// Synthetic board that demonstrates multi-pass rip-up-and-retry routing.
+///
+/// Layout: a vertical wall of through-hole pads (blocking both layers) at
+/// x=30000 with a very narrow gap. Three 3-pin "CAN" nets and three
+/// 2-pin "MUST" nets all need to cross the wall through this gap.
+///
+/// In single-pass, the non-priority nets are ordered by descending pin-count:
+/// the 3-pin CAN nets route before the 2-pin MUST nets and claim the gap.
+///
+/// Multi-pass reprioritizes the failed MUST net(s), giving them first access
+/// to the gap. The CAN nets can route around the wall instead. All nets succeed.
+const CROWDED_DSN: &str = r#"
+(pcb "crowded_board"
+  (resolution um 10)
+  (structure
+    (layer "F.Cu" (type signal))
+    (layer "B.Cu" (type signal))
+    (boundary (rect pcb 0 0 60000 100000))
+    (rule (width 2000) (clearance 2000))
+  )
+  (library
+    (padstack "SMD_pad" (shape (circle "F.Cu" 2000)))
+    (padstack "TH_wall" (shape (circle "*.Cu" 8000)))
+    (image "R" (pin "SMD_pad" "1" -3000 0) (pin "SMD_pad" "2" 3000 0))
+    (image "W1P" (pin "TH_wall" "1" 0 0))
+  )
+  (placement
+    (component "W1P"
+      (place "W1" 30000 4000 front 0)
+      (place "W2" 30000 8000 front 0)
+      (place "W3" 30000 12000 front 0)
+      (place "W4" 30000 16000 front 0)
+      (place "W5" 30000 20000 front 0)
+      (place "W6" 30000 24000 front 0)
+      (place "W7" 30000 28000 front 0)
+      (place "W8" 30000 32000 front 0)
+      (place "W9" 30000 36000 front 0)
+      (place "W10" 30000 46000 front 0)
+      (place "W11" 30000 50000 front 0)
+      (place "W12" 30000 54000 front 0)
+      (place "W13" 30000 58000 front 0)
+      (place "W14" 30000 62000 front 0)
+      (place "W15" 30000 66000 front 0)
+      (place "W16" 30000 70000 front 0)
+      (place "W17" 30000 74000 front 0)
+      (place "W18" 30000 78000 front 0)
+    )
+    (component "R"
+      (place "C1A" 8000 6000 front 0)
+      (place "C1B" 52000 6000 front 0)
+      (place "C1C" 52000 36000 front 0)
+      (place "C2A" 8000 10000 front 0)
+      (place "C2B" 52000 10000 front 0)
+      (place "C2C" 52000 34000 front 0)
+      (place "C3A" 8000 14000 front 0)
+      (place "C3B" 52000 14000 front 0)
+      (place "C3C" 52000 38000 front 0)
+      (place "M1L" 18000 36000 front 0)
+      (place "M1R" 42000 36000 front 0)
+      (place "M2L" 18000 34000 front 0)
+      (place "M2R" 42000 34000 front 0)
+      (place "M3L" 18000 38000 front 0)
+      (place "M3R" 42000 38000 front 0)
+    )
+  )
+  (network
+    (net "CAN1" (pins C1A-2 C1B-1 C1C-2))
+    (net "CAN2" (pins C2A-2 C2B-1 C2C-2))
+    (net "CAN3" (pins C3A-2 C3B-1 C3C-2))
+    (net "MUST1" (pins M1L-2 M1R-1))
+    (net "MUST2" (pins M2L-2 M2R-1))
+    (net "MUST3" (pins M3L-2 M3R-1))
+  )
+  (wiring)
+)
+"#;
+
+#[test]
+fn test_crowded_route_single_pass_routes_most() {
+    let design = dsn::parse_dsn(CROWDED_DSN).expect("Should parse crowded DSN");
+    let single = router::route_single_pass(&design, &[]);
+
+    // The router should handle this crowded board by clearing own-net pad
+    // obstacles and using both layers effectively
+    let routable = design.nets.iter().filter(|n| n.pins.len() >= 2).count();
+    let routed = routable - single.unrouted.len();
+    assert!(
+        routed >= routable / 2,
+        "Expected at least half the nets routed on crowded board, \
+         but only {}/{} routed",
+        routed, routable,
+    );
+}
+
+#[test]
+fn test_crowded_route_multi_pass_succeeds() {
+    let design = dsn::parse_dsn(CROWDED_DSN).expect("Should parse crowded DSN");
+    let multi = router::route(&design);
+
+    // Multi-pass must route ALL nets by re-prioritising the failed ones
+    assert!(
+        multi.unrouted.is_empty(),
+        "Expected multi-pass to route all nets on crowded board, \
+         but unrouted: {:?}",
+        multi.unrouted,
+    );
 }
 
 // ─── No duplicate wires ──────────────────────────────────────────────────────
