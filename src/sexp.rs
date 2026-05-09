@@ -108,10 +108,12 @@ fn parse_items(chars: &mut Peekable) -> Result<Vec<Sexp>, String> {
                         match chars.next() {
                             None => return Err("Unterminated string literal".to_string()),
                             Some('"') => break,
-                            Some('\\') => match chars.next() {
-                                Some(c) => s.push(c),
-                                None => return Err("Unterminated escape in string".to_string()),
-                            },
+                            Some('\\') => {
+                                match chars.next() {
+                                    Some(c) => s.push(c),
+                                    None => return Err("Unterminated escape in string".to_string()),
+                                }
+                            }
                             Some(c) => s.push(c),
                         }
                     }
@@ -133,11 +135,7 @@ fn parse_items(chars: &mut Peekable) -> Result<Vec<Sexp>, String> {
                             loop {
                                 match chars.next() {
                                     None => break,
-                                    Some('"') => {
-                                        atom.push('"');
-                                        terminated = true;
-                                        break;
-                                    }
+                                    Some('"') => { atom.push('"'); terminated = true; break; }
                                     Some('\\') => {
                                         if let Some(c) = chars.next() {
                                             atom.push(c);
@@ -147,10 +145,7 @@ fn parse_items(chars: &mut Peekable) -> Result<Vec<Sexp>, String> {
                                 }
                             }
                             if !terminated {
-                                return Err(format!(
-                                    "Unterminated embedded quote in atom: {}",
-                                    atom
-                                ));
+                                return Err(format!("Unterminated embedded quote in atom: {}", atom));
                             }
                         }
                         Some(c) => {
@@ -219,11 +214,8 @@ mod tests {
         let s = Sexp::parse("(parser (string_quote \") (host_cad \"KiCad\"))").unwrap();
         let sq = s.find("string_quote").unwrap();
         let items = sq.as_list().unwrap();
-        assert_eq!(
-            items[1].as_atom(),
-            Some("\""),
-            "string_quote value should be a bare dquote atom"
-        );
+        assert_eq!(items[1].as_atom(), Some("\""),
+            "string_quote value should be a bare dquote atom");
         let hc = s.find("host_cad").unwrap();
         let hc_items = hc.as_list().unwrap();
         assert_eq!(hc_items[1].as_atom(), Some("KiCad"));

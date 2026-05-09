@@ -1,5 +1,5 @@
-use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashSet};
+use std::cmp::Reverse;
 
 use crate::dsn::{DsnDesign, PadShape, Side};
 
@@ -49,21 +49,11 @@ impl Grid {
         num_layers: usize,
     ) -> Self {
         let obstacles = vec![vec![false; width * height]; num_layers];
-        Grid {
-            width,
-            height,
-            obstacles,
-            grid_size,
-            offset_x,
-            offset_y,
-        }
+        Grid { width, height, obstacles, grid_size, offset_x, offset_y }
     }
 
     fn dsn_to_grid(&self, x: i64, y: i64) -> (i64, i64) {
-        (
-            (x - self.offset_x) / self.grid_size,
-            (y - self.offset_y) / self.grid_size,
-        )
+        ((x - self.offset_x) / self.grid_size, (y - self.offset_y) / self.grid_size)
     }
 
     fn grid_to_dsn_center(&self, gx: i64, gy: i64) -> (i64, i64) {
@@ -223,14 +213,8 @@ struct State {
 
 /// 8-directional moves on the same layer + via transitions.
 const DIRS: [(i32, i32); 8] = [
-    (1, 0),
-    (-1, 0),
-    (0, 1),
-    (0, -1),
-    (1, 1),
-    (1, -1),
-    (-1, 1),
-    (-1, -1),
+    (1, 0), (-1, 0), (0, 1), (0, -1),
+    (1, 1), (1, -1), (-1, 1), (-1, -1),
 ];
 
 /// Octile distance heuristic for A* (admissible with costs 10/14).
@@ -260,11 +244,7 @@ fn bfs(
     let (tcx, tcy) = target_center;
 
     for &(gx, gy, layer) in start_cells {
-        let s = State {
-            gx,
-            gy,
-            layer: layer as u8,
-        };
+        let s = State { gx, gy, layer: layer as u8 };
         let idx = ws.idx(gx, gy, layer);
         ws.set_dist_prev(idx, 0, u32::MAX);
         let h = heuristic(gx, gy, tcx, tcy);
@@ -285,9 +265,7 @@ fn bfs(
             let mut idx = cur_idx;
             loop {
                 let p = ws.get_prev(idx);
-                if p == u32::MAX {
-                    break;
-                }
+                if p == u32::MAX { break; }
                 path.push(ws.decode_index(p as usize));
                 idx = p as usize;
             }
@@ -311,15 +289,7 @@ fn bfs(
             if new_g < ws.get_dist(ns_idx) {
                 ws.set_dist_prev(ns_idx, new_g, cur_idx as u32);
                 let h = heuristic(nx, ny, tcx, tcy);
-                heap.push(Reverse((
-                    new_g + h,
-                    new_g,
-                    State {
-                        gx: nx,
-                        gy: ny,
-                        layer: cur.layer,
-                    },
-                )));
+                heap.push(Reverse((new_g + h, new_g, State { gx: nx, gy: ny, layer: cur.layer })));
             }
         }
 
@@ -336,15 +306,7 @@ fn bfs(
             if new_g < ws.get_dist(ns_idx) {
                 ws.set_dist_prev(ns_idx, new_g, cur_idx as u32);
                 let h = heuristic(cur.gx, cur.gy, tcx, tcy);
-                heap.push(Reverse((
-                    new_g + h,
-                    new_g,
-                    State {
-                        gx: cur.gx,
-                        gy: cur.gy,
-                        layer: other_layer as u8,
-                    },
-                )));
+                heap.push(Reverse((new_g + h, new_g, State { gx: cur.gx, gy: cur.gy, layer: other_layer as u8 })));
             }
         }
     }
@@ -549,11 +511,7 @@ pub fn route(design: &DsnDesign) -> RoutingResult {
 
 /// Build a transitive conflict chain: start with unrouted nets, route them first,
 /// collect any newly-unrouted nets, add them to the priority chain, repeat.
-fn build_conflict_chain(
-    design: &DsnDesign,
-    initial_unrouted: &[String],
-    via_cost: u32,
-) -> Vec<String> {
+fn build_conflict_chain(design: &DsnDesign, initial_unrouted: &[String], via_cost: u32) -> Vec<String> {
     let mut chain: Vec<String> = initial_unrouted.to_vec();
     let mut seen_sets: Vec<Vec<String>> = Vec::new();
 
@@ -604,9 +562,7 @@ fn find_spatial_neighbors(
     for net in &design.nets {
         if unrouted.contains(&net.name) {
             for pin in &net.pins {
-                if let Some((x, y, _)) =
-                    crate::dsn::get_pad_position(design, &pin.component, &pin.pin)
-                {
+                if let Some((x, y, _)) = crate::dsn::get_pad_position(design, &pin.component, &pin.pin) {
                     unrouted_positions.push((x, y));
                 }
             }
@@ -620,8 +576,7 @@ fn find_spatial_neighbors(
             continue;
         }
         'pin_loop: for pin in &net.pins {
-            if let Some((x, y, _)) = crate::dsn::get_pad_position(design, &pin.component, &pin.pin)
-            {
+            if let Some((x, y, _)) = crate::dsn::get_pad_position(design, &pin.component, &pin.pin) {
                 for &(ux, uy) in &unrouted_positions {
                     let dist = ((x - ux).abs()).max((y - uy).abs());
                     if dist <= radius {
@@ -646,11 +601,7 @@ pub fn route_single_pass(design: &DsnDesign, priority_nets: &[String]) -> Routin
 }
 
 /// Run a single routing pass with a configurable via cost.
-fn route_single_pass_with_via_cost(
-    design: &DsnDesign,
-    priority_nets: &[String],
-    via_cost: u32,
-) -> RoutingResult {
+fn route_single_pass_with_via_cost(design: &DsnDesign, priority_nets: &[String], via_cost: u32) -> RoutingResult {
     let trace_width = design.rules.trace_width.max(1);
     let clearance = design.rules.clearance.max(1);
 
@@ -664,8 +615,7 @@ fn route_single_pass_with_via_cost(
     );
     for net in &design.nets {
         for pin in &net.pins {
-            if let Some((x, y, _)) = crate::dsn::get_pad_position(design, &pin.component, &pin.pin)
-            {
+            if let Some((x, y, _)) = crate::dsn::get_pad_position(design, &pin.component, &pin.pin) {
                 min_x = min_x.min(x);
                 min_y = min_y.min(y);
                 max_x = max_x.max(x);
@@ -741,14 +691,8 @@ fn route_single_pass_with_via_cost(
         b_pri.cmp(&a_pri).then_with(|| {
             if a_pri && b_pri {
                 // Among priority nets: preserve the order from priority_nets
-                let a_idx = priority_nets
-                    .iter()
-                    .position(|n| n == &a.name)
-                    .unwrap_or(usize::MAX);
-                let b_idx = priority_nets
-                    .iter()
-                    .position(|n| n == &b.name)
-                    .unwrap_or(usize::MAX);
+                let a_idx = priority_nets.iter().position(|n| n == &a.name).unwrap_or(usize::MAX);
+                let b_idx = priority_nets.iter().position(|n| n == &b.name).unwrap_or(usize::MAX);
                 a_idx.cmp(&b_idx)
             } else {
                 // Non-priority: descending pin count (large nets first)
@@ -766,7 +710,9 @@ fn route_single_pass_with_via_cost(
         let pad_positions: Vec<Option<(i64, i64, String)>> = net
             .pins
             .iter()
-            .map(|pin_ref| crate::dsn::get_pad_position(design, &pin_ref.component, &pin_ref.pin))
+            .map(|pin_ref| {
+                crate::dsn::get_pad_position(design, &pin_ref.component, &pin_ref.pin)
+            })
             .collect();
 
         let valid_pads: Vec<(i64, i64, usize)> = pad_positions
@@ -792,10 +738,7 @@ fn route_single_pass_with_via_cost(
                 let (gx, gy) = grid.dsn_to_grid(pos.0, pos.1);
 
                 // Look up padstack to get obstacle radius and layers
-                let comp = design
-                    .components
-                    .iter()
-                    .find(|c| c.places.iter().any(|p| p.reference == pin_ref.component))?;
+                let comp = design.components.iter().find(|c| c.places.iter().any(|p| p.reference == pin_ref.component))?;
                 let image = design.images.get(&comp.image_name)?;
                 let pin = image.pins.iter().find(|p| p.pin_number == pin_ref.pin)?;
                 let padstack = design.padstacks.get(&pin.padstack_name)?;
@@ -842,10 +785,7 @@ fn route_single_pass_with_via_cost(
             .pins
             .iter()
             .map(|pin_ref| {
-                let comp = design
-                    .components
-                    .iter()
-                    .find(|c| c.places.iter().any(|p| p.reference == pin_ref.component));
+                let comp = design.components.iter().find(|c| c.places.iter().any(|p| p.reference == pin_ref.component));
                 let is_th = comp.and_then(|c| {
                     let image = design.images.get(&c.image_name)?;
                     let pin = image.pins.iter().find(|p| p.pin_number == pin_ref.pin)?;
@@ -911,15 +851,7 @@ fn route_single_pass_with_via_cost(
             }
 
             // A* search
-            let path = bfs(
-                &grid,
-                &start_cells,
-                (tgx as i32, tgy as i32),
-                &signal_layers,
-                &mut ws,
-                &mut heap,
-                via_cost,
-            );
+            let path = bfs(&grid, &start_cells, (tgx as i32, tgy as i32), &signal_layers, &mut ws, &mut heap, via_cost);
             ws.clear_targets();
 
             match path {
@@ -1006,11 +938,7 @@ fn max_pad_radius(shapes: &[PadShape], grid_size: i64, clearance_cells: i64) -> 
             }
             PadShape::Path { width, .. } => width / 2 / grid_size + clearance_cells,
             PadShape::Polygon { points, .. } => {
-                let max_extent = points
-                    .iter()
-                    .map(|p| p.x.abs().max(p.y.abs()))
-                    .max()
-                    .unwrap_or(0);
+                let max_extent = points.iter().map(|p| p.x.abs().max(p.y.abs())).max().unwrap_or(0);
                 max_extent / grid_size + clearance_cells
             }
         })

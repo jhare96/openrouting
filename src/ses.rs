@@ -1,6 +1,6 @@
-use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
+use std::fs::File;
 
 use crate::dsn::DsnDesign;
 use crate::router::RoutingResult;
@@ -53,10 +53,7 @@ pub fn write_ses(
         std::collections::HashMap::new();
 
     for wire in &routing.wires {
-        net_wires
-            .entry(wire.net_name.as_str())
-            .or_default()
-            .push(wire);
+        net_wires.entry(wire.net_name.as_str()).or_default().push(wire);
     }
     for via in &routing.vias {
         net_vias.entry(via.net_name.as_str()).or_default().push(via);
@@ -108,8 +105,8 @@ pub fn write_ses(
     }
 
     writeln!(w, "    )")?; // network_out
-    writeln!(w, "  )")?; // routes
-    writeln!(w, ")")?; // session
+    writeln!(w, "  )")?;   // routes
+    writeln!(w, ")")?;     // session
 
     Ok(())
 }
@@ -128,39 +125,25 @@ mod tests {
 
     #[test]
     fn test_write_ses_no_panic() {
-        use crate::dsn::*;
         use std::collections::HashMap;
+        use crate::dsn::*;
 
         let design = DsnDesign {
             name: "test".to_string(),
-            resolution: Resolution {
-                unit: "um".to_string(),
-                value: 10,
-            },
+            resolution: Resolution { unit: "um".to_string(), value: 10 },
             unit: "um".to_string(),
-            layers: vec![Layer {
-                name: "F.Cu".to_string(),
-                layer_type: "signal".to_string(),
-                index: 0,
-            }],
+            layers: vec![
+                Layer { name: "F.Cu".to_string(), layer_type: "signal".to_string(), index: 0 },
+            ],
             boundary: Boundary {
                 points: vec![],
-                min_x: 0,
-                min_y: 0,
-                max_x: 100000,
-                max_y: 100000,
+                min_x: 0, min_y: 0, max_x: 100000, max_y: 100000,
             },
-            rules: DesignRule {
-                trace_width: 250,
-                clearance: 200,
-            },
+            rules: DesignRule { trace_width: 250, clearance: 200 },
             components: vec![],
             images: HashMap::new(),
             padstacks: HashMap::new(),
-            nets: vec![Net {
-                name: "NET1".to_string(),
-                pins: vec![],
-            }],
+            nets: vec![Net { name: "NET1".to_string(), pins: vec![] }],
             wiring: vec![],
         };
 

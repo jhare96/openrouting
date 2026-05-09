@@ -6,10 +6,7 @@ use clap::Parser;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(
-    name = "openrouting",
-    about = "PCB auto-router: accepts a .dsn file and outputs a .ses file"
-)]
+#[command(name = "openrouting", about = "PCB auto-router: accepts a .dsn file and outputs a .ses file")]
 struct Args {
     /// Input DSN file
     input: PathBuf,
