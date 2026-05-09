@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use crate::sexp::Sexp;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Point {
@@ -74,11 +74,31 @@ pub struct Image {
 
 #[derive(Debug, Clone)]
 pub enum PadShape {
-    Circle { layer: String, diameter: i64 },
-    Rect { layer: String, x1: i64, y1: i64, x2: i64, y2: i64 },
-    Oval { layer: String, width: i64, height: i64 },
-    Polygon { layer: String, points: Vec<Point> },
-    Path { layer: String, width: i64, points: Vec<Point> },
+    Circle {
+        layer: String,
+        diameter: i64,
+    },
+    Rect {
+        layer: String,
+        x1: i64,
+        y1: i64,
+        x2: i64,
+        y2: i64,
+    },
+    Oval {
+        layer: String,
+        width: i64,
+        height: i64,
+    },
+    Polygon {
+        layer: String,
+        points: Vec<Point>,
+    },
+    Path {
+        layer: String,
+        width: i64,
+        points: Vec<Point>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -130,10 +150,7 @@ fn atom_str(s: &Sexp) -> &str {
 }
 
 fn parse_i64(s: &Sexp) -> i64 {
-    atom_str(s)
-        .parse::<f64>()
-        .map(|f| f as i64)
-        .unwrap_or(0)
+    atom_str(s).parse::<f64>().map(|f| f as i64).unwrap_or(0)
 }
 
 fn parse_f64(s: &Sexp) -> f64 {
@@ -152,7 +169,10 @@ fn parse_pin_ref(token: &str) -> PinRef {
     if let Some(idx) = stripped.find("\"-\"") {
         let comp = stripped[..idx].trim_matches('"').to_string();
         let pin = stripped[idx + 3..].trim_matches('"').to_string();
-        return PinRef { component: comp, pin };
+        return PinRef {
+            component: comp,
+            pin,
+        };
     }
 
     // Check for COMP-"PIN" format (pin name is quoted, may contain dashes)
@@ -161,7 +181,10 @@ fn parse_pin_ref(token: &str) -> PinRef {
         let comp = stripped[..idx].to_string();
         let pin = stripped[idx + 1..].trim_matches('"').to_string();
         if !comp.is_empty() && !pin.is_empty() {
-            return PinRef { component: comp, pin };
+            return PinRef {
+                component: comp,
+                pin,
+            };
         }
     }
 
@@ -170,7 +193,10 @@ fn parse_pin_ref(token: &str) -> PinRef {
         let comp = stripped[..pos].to_string();
         let pin = stripped[pos + 1..].to_string();
         if !pin.is_empty() {
-            return PinRef { component: comp, pin };
+            return PinRef {
+                component: comp,
+                pin,
+            };
         }
         // rfind gave empty pin (e.g., "C60--" where pin is "-").
         // Fall back to first dash as separator.
@@ -179,11 +205,17 @@ fn parse_pin_ref(token: &str) -> PinRef {
                 let comp = stripped[..fpos].to_string();
                 let pin = stripped[fpos + 1..].to_string();
                 if !comp.is_empty() && !pin.is_empty() {
-                    return PinRef { component: comp, pin };
+                    return PinRef {
+                        component: comp,
+                        pin,
+                    };
                 }
             }
         }
-        PinRef { component: comp, pin }
+        PinRef {
+            component: comp,
+            pin,
+        }
     } else {
         PinRef {
             component: stripped.to_string(),
@@ -221,11 +253,18 @@ pub fn parse_dsn(input: &str) -> Result<DsnDesign, String> {
     let resolution = if let Some(res) = pcb.find("resolution") {
         let items = res.as_list().unwrap_or(&[]);
         Resolution {
-            unit: items.get(1).and_then(|s| s.as_atom()).unwrap_or("um").to_string(),
+            unit: items
+                .get(1)
+                .and_then(|s| s.as_atom())
+                .unwrap_or("um")
+                .to_string(),
             value: items.get(2).map(parse_i64).unwrap_or(1),
         }
     } else {
-        Resolution { unit: "um".to_string(), value: 1 }
+        Resolution {
+            unit: "um".to_string(),
+            value: 1,
+        }
     };
 
     // unit
@@ -283,7 +322,10 @@ fn parse_structure(node: Option<&Sexp>) -> (Vec<Layer>, Boundary, DesignRule) {
         max_x: 100_000,
         max_y: 100_000,
     };
-    let mut rules = DesignRule { trace_width: 250, clearance: 200 };
+    let mut rules = DesignRule {
+        trace_width: 250,
+        clearance: 200,
+    };
 
     let node = match node {
         Some(n) => n,
@@ -299,7 +341,11 @@ fn parse_structure(node: Option<&Sexp>) -> (Vec<Layer>, Boundary, DesignRule) {
         match item.name() {
             Some("layer") => {
                 let items = item.as_list().unwrap_or(&[]);
-                let lname = items.get(1).and_then(|s| s.as_atom()).unwrap_or("").to_string();
+                let lname = items
+                    .get(1)
+                    .and_then(|s| s.as_atom())
+                    .unwrap_or("")
+                    .to_string();
                 let ltype = item
                     .find("type")
                     .and_then(|t| t.as_list())
@@ -307,7 +353,11 @@ fn parse_structure(node: Option<&Sexp>) -> (Vec<Layer>, Boundary, DesignRule) {
                     .and_then(|s| s.as_atom())
                     .unwrap_or("signal")
                     .to_string();
-                layers.push(Layer { name: lname, layer_type: ltype, index: layer_idx });
+                layers.push(Layer {
+                    name: lname,
+                    layer_type: ltype,
+                    index: layer_idx,
+                });
                 layer_idx += 1;
             }
             Some("boundary") => {
@@ -322,8 +372,16 @@ fn parse_structure(node: Option<&Sexp>) -> (Vec<Layer>, Boundary, DesignRule) {
 
     // Default layers if none found
     if layers.is_empty() {
-        layers.push(Layer { name: "F.Cu".to_string(), layer_type: "signal".to_string(), index: 0 });
-        layers.push(Layer { name: "B.Cu".to_string(), layer_type: "signal".to_string(), index: 1 });
+        layers.push(Layer {
+            name: "F.Cu".to_string(),
+            layer_type: "signal".to_string(),
+            index: 0,
+        });
+        layers.push(Layer {
+            name: "B.Cu".to_string(),
+            layer_type: "signal".to_string(),
+            index: 1,
+        });
     }
 
     (layers, boundary, rules)
@@ -385,7 +443,13 @@ fn parse_boundary(node: &Sexp) -> Boundary {
                     let min_y = points.iter().map(|p| p.y).min().unwrap_or(0);
                     let max_x = points.iter().map(|p| p.x).max().unwrap_or(0);
                     let max_y = points.iter().map(|p| p.y).max().unwrap_or(0);
-                    return Boundary { points, min_x, min_y, max_x, max_y };
+                    return Boundary {
+                        points,
+                        min_x,
+                        min_y,
+                        max_x,
+                        max_y,
+                    };
                 }
             }
             _ => {}
@@ -425,7 +489,10 @@ fn default_boundary() -> Boundary {
         points: vec![
             Point { x: 0, y: 0 },
             Point { x: 100_000, y: 0 },
-            Point { x: 100_000, y: 100_000 },
+            Point {
+                x: 100_000,
+                y: 100_000,
+            },
             Point { x: 0, y: 100_000 },
         ],
         min_x: 0,
@@ -440,15 +507,21 @@ fn parse_rule(node: &Sexp) -> DesignRule {
     let mut clearance = 200i64;
     let list = match node.as_list() {
         Some(l) => l,
-        None => return DesignRule { trace_width, clearance },
+        None => {
+            return DesignRule {
+                trace_width,
+                clearance,
+            };
+        }
     };
     for item in list.iter().skip(1) {
         match item.name() {
             Some("width") => {
                 if let Some(items) = item.as_list()
-                    && let Some(v) = items.get(1) {
-                        trace_width = parse_i64(v);
-                    }
+                    && let Some(v) = items.get(1)
+                {
+                    trace_width = parse_i64(v);
+                }
             }
             Some("clearance") => {
                 // Only use the default clearance (no "type" specifier).
@@ -466,7 +539,10 @@ fn parse_rule(node: &Sexp) -> DesignRule {
             _ => {}
         }
     }
-    DesignRule { trace_width, clearance }
+    DesignRule {
+        trace_width,
+        clearance,
+    }
 }
 
 fn parse_library(node: Option<&Sexp>) -> (HashMap<String, Image>, HashMap<String, Padstack>) {
@@ -529,7 +605,11 @@ fn parse_image(node: &Sexp) -> Option<Image> {
                 if items.len() < 4 {
                     continue;
                 }
-                let padstack_name = items.get(1).and_then(|s| s.as_atom()).unwrap_or("").to_string();
+                let padstack_name = items
+                    .get(1)
+                    .and_then(|s| s.as_atom())
+                    .unwrap_or("")
+                    .to_string();
 
                 // Handle optional (rotate angle) child
                 let mut rotation = 0.0f64;
@@ -543,17 +623,31 @@ fn parse_image(node: &Sexp) -> Option<Image> {
                     offset = 3; // skip past the rotate list
                 }
 
-                let pin_number = items.get(offset).and_then(|s| s.as_atom()).unwrap_or("").to_string();
+                let pin_number = items
+                    .get(offset)
+                    .and_then(|s| s.as_atom())
+                    .unwrap_or("")
+                    .to_string();
                 let x = items.get(offset + 1).map(parse_i64).unwrap_or(0);
                 let y = items.get(offset + 2).map(parse_i64).unwrap_or(0);
 
-                pins.push(ImagePin { padstack_name, pin_number, x, y, rotation });
+                pins.push(ImagePin {
+                    padstack_name,
+                    pin_number,
+                    x,
+                    y,
+                    rotation,
+                });
             }
             _ => {}
         }
     }
 
-    Some(Image { name, outlines, pins })
+    Some(Image {
+        name,
+        outlines,
+        pins,
+    })
 }
 
 fn parse_padstack(node: &Sexp) -> Option<Padstack> {
@@ -566,9 +660,10 @@ fn parse_padstack(node: &Sexp) -> Option<Padstack> {
         match item.name() {
             Some("shape") => {
                 if let Some(shape_node) = item.as_list().and_then(|l| l.get(1))
-                    && let Some(shape) = parse_pad_shape(shape_node) {
-                        shapes.push(shape);
-                    }
+                    && let Some(shape) = parse_pad_shape(shape_node)
+                {
+                    shapes.push(shape);
+                }
             }
             Some("attach") => {
                 attach = item
@@ -582,7 +677,11 @@ fn parse_padstack(node: &Sexp) -> Option<Padstack> {
         }
     }
 
-    Some(Padstack { name, shapes, attach })
+    Some(Padstack {
+        name,
+        shapes,
+        attach,
+    })
 }
 
 fn parse_pad_shape(node: &Sexp) -> Option<PadShape> {
@@ -600,13 +699,23 @@ fn parse_pad_shape(node: &Sexp) -> Option<PadShape> {
             let y1 = list.get(3).map(parse_i64).unwrap_or(0);
             let x2 = list.get(4).map(parse_i64).unwrap_or(0);
             let y2 = list.get(5).map(parse_i64).unwrap_or(0);
-            Some(PadShape::Rect { layer, x1, y1, x2, y2 })
+            Some(PadShape::Rect {
+                layer,
+                x1,
+                y1,
+                x2,
+                y2,
+            })
         }
         "oval" => {
             let layer = list.get(1)?.as_atom()?.to_string();
             let width = list.get(2).map(parse_i64).unwrap_or(100);
             let height = list.get(3).map(parse_i64).unwrap_or(100);
-            Some(PadShape::Oval { layer, width, height })
+            Some(PadShape::Oval {
+                layer,
+                width,
+                height,
+            })
         }
         "path" => {
             let layer = list.get(1)?.as_atom()?.to_string();
@@ -620,7 +729,11 @@ fn parse_pad_shape(node: &Sexp) -> Option<PadShape> {
                 });
                 i += 2;
             }
-            Some(PadShape::Path { layer, width, points })
+            Some(PadShape::Path {
+                layer,
+                width,
+                points,
+            })
         }
         "polygon" => {
             let layer = list.get(1)?.as_atom()?.to_string();
@@ -650,13 +763,18 @@ fn parse_placement(node: Option<&Sexp>) -> Vec<Component> {
     for item in list.iter().skip(1) {
         if item.name() == Some("component") {
             let items = item.as_list().unwrap_or(&[]);
-            let image_name = items.get(1).and_then(|s| s.as_atom()).unwrap_or("").to_string();
+            let image_name = items
+                .get(1)
+                .and_then(|s| s.as_atom())
+                .unwrap_or("")
+                .to_string();
             let mut places = Vec::new();
             for child in items.iter().skip(2) {
                 if child.name() == Some("place")
-                    && let Some(place) = parse_place(child) {
-                        places.push(place);
-                    }
+                    && let Some(place) = parse_place(child)
+                {
+                    places.push(place);
+                }
             }
             components.push(Component { image_name, places });
         }
@@ -672,9 +790,19 @@ fn parse_place(node: &Sexp) -> Option<Place> {
     let x = list.get(2).map(parse_i64).unwrap_or(0);
     let y = list.get(3).map(parse_i64).unwrap_or(0);
     let side_str = list.get(4).and_then(|s| s.as_atom()).unwrap_or("front");
-    let side = if side_str.eq_ignore_ascii_case("back") { Side::Back } else { Side::Front };
+    let side = if side_str.eq_ignore_ascii_case("back") {
+        Side::Back
+    } else {
+        Side::Front
+    };
     let rotation = list.get(5).map(parse_f64).unwrap_or(0.0);
-    Some(Place { reference, x, y, side, rotation })
+    Some(Place {
+        reference,
+        x,
+        y,
+        side,
+        rotation,
+    })
 }
 
 fn parse_network(node: Option<&Sexp>) -> Vec<Net> {
@@ -687,7 +815,11 @@ fn parse_network(node: Option<&Sexp>) -> Vec<Net> {
     for item in list.iter().skip(1) {
         if item.name() == Some("net") {
             let items = item.as_list().unwrap_or(&[]);
-            let name = items.get(1).and_then(|s| s.as_atom()).unwrap_or("").to_string();
+            let name = items
+                .get(1)
+                .and_then(|s| s.as_atom())
+                .unwrap_or("")
+                .to_string();
             let mut pins = Vec::new();
             if let Some(pins_node) = item.find("pins") {
                 let pins_list = pins_node.as_list().unwrap_or(&[]);
@@ -713,9 +845,10 @@ fn parse_wiring(node: Option<&Sexp>) -> Vec<Wire> {
 
     for item in list.iter().skip(1) {
         if item.name() == Some("wire")
-            && let Some(wire) = parse_wire(item) {
-                wires.push(wire);
-            }
+            && let Some(wire) = parse_wire(item)
+        {
+            wires.push(wire);
+        }
     }
 
     wires
@@ -751,7 +884,12 @@ fn parse_wire(node: &Sexp) -> Option<Wire> {
         .unwrap_or("")
         .to_string();
 
-    Some(Wire { net_name, layer, width, points })
+    Some(Wire {
+        net_name,
+        layer,
+        width,
+        points,
+    })
 }
 
 // ─── pad position helper ──────────────────────────────────────────────────────
@@ -764,7 +902,10 @@ pub fn get_pad_position(
 ) -> Option<(i64, i64, String)> {
     // Find the component placement
     let place = design.components.iter().find_map(|comp| {
-        comp.places.iter().find(|p| p.reference == comp_ref).map(|p| (comp, p))
+        comp.places
+            .iter()
+            .find(|p| p.reference == comp_ref)
+            .map(|p| (comp, p))
     });
     let (comp, place) = place?;
 
@@ -803,12 +944,20 @@ pub fn get_pad_position(
                 PadShape::Path { layer, .. } => layer.as_str(),
             };
             if l == "*.Cu" {
-                if place.side == Side::Back { "B.Cu" } else { "F.Cu" }
+                if place.side == Side::Back {
+                    "B.Cu"
+                } else {
+                    "F.Cu"
+                }
             } else {
                 l
             }
         })
-        .unwrap_or(if place.side == Side::Back { "B.Cu" } else { "F.Cu" })
+        .unwrap_or(if place.side == Side::Back {
+            "B.Cu"
+        } else {
+            "F.Cu"
+        })
         .to_string();
 
     Some((abs_x, abs_y, layer))

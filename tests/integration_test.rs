@@ -364,11 +364,22 @@ fn test_route_one_net() {
 
     // Should route exactly 1 net (NET1)
     let routed_count = design.nets.len() - result.unrouted.len();
-    assert_eq!(routed_count, 1, "Expected 1 routed net, got {}", routed_count);
-    assert!(result.unrouted.is_empty(), "Expected no unrouted nets, got: {:?}", result.unrouted);
+    assert_eq!(
+        routed_count, 1,
+        "Expected 1 routed net, got {}",
+        routed_count
+    );
+    assert!(
+        result.unrouted.is_empty(),
+        "Expected no unrouted nets, got: {:?}",
+        result.unrouted
+    );
 
     // Should have at least 1 wire
-    assert!(!result.wires.is_empty(), "Expected at least one wire segment");
+    assert!(
+        !result.wires.is_empty(),
+        "Expected at least one wire segment"
+    );
     // All wires should belong to NET1
     for wire in &result.wires {
         assert_eq!(wire.net_name, "NET1");
@@ -383,10 +394,19 @@ fn test_ses_output_valid() {
     let (_, content) = write_ses_tmp(&design, &routing, "basic_ses");
 
     // Basic structure checks
-    assert!(content.starts_with("(session"), "SES should start with (session");
-    assert!(content.contains("base_design"), "SES should contain base_design");
+    assert!(
+        content.starts_with("(session"),
+        "SES should start with (session"
+    );
+    assert!(
+        content.contains("base_design"),
+        "SES should contain base_design"
+    );
     assert!(content.contains("routes"), "SES should contain routes");
-    assert!(content.contains("network_out"), "SES should contain network_out");
+    assert!(
+        content.contains("network_out"),
+        "SES should contain network_out"
+    );
     assert!(content.contains("NET1"), "SES should reference NET1");
     assert!(content.contains("wire"), "SES should contain wire entries");
 
@@ -411,12 +431,22 @@ fn test_wire_points_within_boundary() {
             assert!(
                 x >= b.min_x - margin && x <= b.max_x + margin,
                 "Wire {} point {} x={} is outside boundary [{}, {}] (margin {})",
-                wire.net_name, i, x, b.min_x, b.max_x, margin,
+                wire.net_name,
+                i,
+                x,
+                b.min_x,
+                b.max_x,
+                margin,
             );
             assert!(
                 y >= b.min_y - margin && y <= b.max_y + margin,
                 "Wire {} point {} y={} is outside boundary [{}, {}] (margin {})",
-                wire.net_name, i, y, b.min_y, b.max_y, margin,
+                wire.net_name,
+                i,
+                y,
+                b.min_y,
+                b.max_y,
+                margin,
             );
         }
     }
@@ -432,7 +462,9 @@ fn test_wire_layers_are_valid() {
         assert!(
             valid.contains(&wire.layer),
             "Wire on net {} references unknown layer '{}'; valid layers: {:?}",
-            wire.net_name, wire.layer, valid,
+            wire.net_name,
+            wire.layer,
+            valid,
         );
     }
 }
@@ -446,7 +478,8 @@ fn test_wire_segments_have_correct_width() {
         assert!(
             wire.width > 0,
             "Wire on net {} has non-positive width {}",
-            wire.net_name, wire.width,
+            wire.net_name,
+            wire.width,
         );
         assert_eq!(
             wire.width, design.rules.trace_width,
@@ -485,12 +518,18 @@ fn test_via_coordinates_within_boundary() {
         assert!(
             via.x >= b.min_x - margin && via.x <= b.max_x + margin,
             "Via on net {} x={} outside boundary [{}, {}]",
-            via.net_name, via.x, b.min_x, b.max_x,
+            via.net_name,
+            via.x,
+            b.min_x,
+            b.max_x,
         );
         assert!(
             via.y >= b.min_y - margin && via.y <= b.max_y + margin,
             "Via on net {} y={} outside boundary [{}, {}]",
-            via.net_name, via.y, b.min_y, b.max_y,
+            via.net_name,
+            via.y,
+            b.min_y,
+            b.max_y,
         );
     }
 }
@@ -564,8 +603,16 @@ fn test_multi_net_wire_geometry_valid() {
     let margin = design.rules.trace_width + design.rules.clearance;
 
     for wire in &result.wires {
-        assert!(wire.points.len() >= 2, "Wire on {} has < 2 points", wire.net_name);
-        assert!(valid_layers.contains(&wire.layer), "Invalid layer {}", wire.layer);
+        assert!(
+            wire.points.len() >= 2,
+            "Wire on {} has < 2 points",
+            wire.net_name
+        );
+        assert!(
+            valid_layers.contains(&wire.layer),
+            "Invalid layer {}",
+            wire.layer
+        );
         assert_eq!(wire.width, design.rules.trace_width);
         for &(x, y) in &wire.points {
             assert!(x >= b.min_x - margin && x <= b.max_x + margin);
@@ -612,8 +659,14 @@ fn test_single_pin_net_not_routed() {
     let result = router::route(&design);
 
     // A net with a single pin should not produce any wires or be listed as unrouted
-    assert!(result.wires.is_empty(), "No wires expected for single-pin net");
-    assert!(result.vias.is_empty(), "No vias expected for single-pin net");
+    assert!(
+        result.wires.is_empty(),
+        "No wires expected for single-pin net"
+    );
+    assert!(
+        result.vias.is_empty(),
+        "No vias expected for single-pin net"
+    );
 }
 
 #[test]
@@ -621,9 +674,18 @@ fn test_empty_network() {
     let design = dsn::parse_dsn(EMPTY_NETWORK_DSN).expect("Should parse DSN");
     let result = router::route(&design);
 
-    assert!(result.wires.is_empty(), "No wires expected with empty network");
-    assert!(result.vias.is_empty(), "No vias expected with empty network");
-    assert!(result.unrouted.is_empty(), "No unrouted nets with empty network");
+    assert!(
+        result.wires.is_empty(),
+        "No wires expected with empty network"
+    );
+    assert!(
+        result.vias.is_empty(),
+        "No vias expected with empty network"
+    );
+    assert!(
+        result.unrouted.is_empty(),
+        "No unrouted nets with empty network"
+    );
 }
 
 #[test]
@@ -637,7 +699,10 @@ fn test_route_adjacent_components() {
         "Adjacent components should be routable; unrouted: {:?}",
         result.unrouted,
     );
-    assert!(!result.wires.is_empty(), "Expected wires for adjacent route");
+    assert!(
+        !result.wires.is_empty(),
+        "Expected wires for adjacent route"
+    );
 }
 
 // ─── Multi-layer / via usage ──────────────────────────────────────────────────
@@ -686,7 +751,11 @@ fn test_route_endpoints_near_pads() {
     let grid_tolerance = design.rules.trace_width.max(design.rules.clearance) * 5;
 
     // Collect all wire endpoints for NET1
-    let net_wires: Vec<_> = result.wires.iter().filter(|w| w.net_name == "NET1").collect();
+    let net_wires: Vec<_> = result
+        .wires
+        .iter()
+        .filter(|w| w.net_name == "NET1")
+        .collect();
     assert!(!net_wires.is_empty());
 
     let all_endpoints: Vec<(i64, i64)> = net_wires
@@ -706,8 +775,16 @@ fn test_route_endpoints_near_pads() {
         (x - pad2.0).abs() <= grid_tolerance && (y - pad2.1).abs() <= grid_tolerance
     });
 
-    assert!(near_pad1, "No wire endpoint near pad R1-2 ({}, {}); endpoints: {:?}", pad1.0, pad1.1, all_endpoints);
-    assert!(near_pad2, "No wire endpoint near pad R2-1 ({}, {}); endpoints: {:?}", pad2.0, pad2.1, all_endpoints);
+    assert!(
+        near_pad1,
+        "No wire endpoint near pad R1-2 ({}, {}); endpoints: {:?}",
+        pad1.0, pad1.1, all_endpoints
+    );
+    assert!(
+        near_pad2,
+        "No wire endpoint near pad R2-1 ({}, {}); endpoints: {:?}",
+        pad2.0, pad2.1, all_endpoints
+    );
 }
 
 // ─── SES re-parseable as valid s-expression ───────────────────────────────────
@@ -720,9 +797,17 @@ fn test_ses_reparseable_simple() {
 
     // The SES file must be a valid s-expression
     let parsed = Sexp::parse(&content);
-    assert!(parsed.is_ok(), "SES output is not valid s-expression: {}", parsed.unwrap_err());
+    assert!(
+        parsed.is_ok(),
+        "SES output is not valid s-expression: {}",
+        parsed.unwrap_err()
+    );
     let sexp = parsed.unwrap();
-    assert_eq!(sexp.name(), Some("session"), "Root s-expression should be (session ...)");
+    assert_eq!(
+        sexp.name(),
+        Some("session"),
+        "Root s-expression should be (session ...)"
+    );
 }
 
 #[test]
@@ -732,7 +817,11 @@ fn test_ses_reparseable_multi_net() {
     let (_, content) = write_ses_tmp(&design, &routing, "reparse_multi");
 
     let parsed = Sexp::parse(&content);
-    assert!(parsed.is_ok(), "SES output is not valid s-expression: {}", parsed.unwrap_err());
+    assert!(
+        parsed.is_ok(),
+        "SES output is not valid s-expression: {}",
+        parsed.unwrap_err()
+    );
     let sexp = parsed.unwrap();
     assert_eq!(sexp.name(), Some("session"));
 
@@ -781,19 +870,46 @@ fn test_four_net_routing_validity() {
     assert!(routed_count > 0, "Expected at least one routed net");
 
     for wire in &result.wires {
-        assert!(wire.points.len() >= 2, "Wire on {} has < 2 points", wire.net_name);
-        assert!(valid_layers.contains(&wire.layer), "Invalid layer {}", wire.layer);
-        assert!(valid_nets.contains(&wire.net_name), "Unknown net {}", wire.net_name);
+        assert!(
+            wire.points.len() >= 2,
+            "Wire on {} has < 2 points",
+            wire.net_name
+        );
+        assert!(
+            valid_layers.contains(&wire.layer),
+            "Invalid layer {}",
+            wire.layer
+        );
+        assert!(
+            valid_nets.contains(&wire.net_name),
+            "Unknown net {}",
+            wire.net_name
+        );
         assert!(wire.width > 0, "Non-positive wire width");
         for &(x, y) in &wire.points {
-            assert!(x >= b.min_x - margin && x <= b.max_x + margin, "x out of bounds");
-            assert!(y >= b.min_y - margin && y <= b.max_y + margin, "y out of bounds");
+            assert!(
+                x >= b.min_x - margin && x <= b.max_x + margin,
+                "x out of bounds"
+            );
+            assert!(
+                y >= b.min_y - margin && y <= b.max_y + margin,
+                "y out of bounds"
+            );
         }
     }
     for via in &result.vias {
-        assert!(valid_nets.contains(&via.net_name), "Via references unknown net");
-        assert!(via.x >= b.min_x - margin && via.x <= b.max_x + margin, "via x out of bounds");
-        assert!(via.y >= b.min_y - margin && via.y <= b.max_y + margin, "via y out of bounds");
+        assert!(
+            valid_nets.contains(&via.net_name),
+            "Via references unknown net"
+        );
+        assert!(
+            via.x >= b.min_x - margin && via.x <= b.max_x + margin,
+            "via x out of bounds"
+        );
+        assert!(
+            via.y >= b.min_y - margin && via.y <= b.max_y + margin,
+            "via y out of bounds"
+        );
     }
 }
 
@@ -804,7 +920,11 @@ fn test_four_net_ses_reparseable() {
     let (_, content) = write_ses_tmp(&design, &routing, "four_net_ses");
 
     let parsed = Sexp::parse(&content);
-    assert!(parsed.is_ok(), "SES output not valid s-expression: {}", parsed.unwrap_err());
+    assert!(
+        parsed.is_ok(),
+        "SES output not valid s-expression: {}",
+        parsed.unwrap_err()
+    );
 
     let open = content.chars().filter(|&c| c == '(').count();
     let close = content.chars().filter(|&c| c == ')').count();
@@ -832,17 +952,38 @@ fn test_route_dac2020_benchmark() {
     let margin = design.rules.trace_width.max(design.rules.clearance) * 3;
 
     // Should route all nets
-    assert_eq!(result.unrouted.len(), 0,
-        "Expected all nets routed on dac2020_bm05; {} unrouted: {:?}", result.unrouted.len(), result.unrouted);
+    assert_eq!(
+        result.unrouted.len(),
+        0,
+        "Expected all nets routed on dac2020_bm05; {} unrouted: {:?}",
+        result.unrouted.len(),
+        result.unrouted
+    );
 
     for wire in &result.wires {
         assert!(wire.points.len() >= 2, "Wire segment needs >= 2 points");
-        assert!(valid_layers.contains(&wire.layer), "Unknown layer: {}", wire.layer);
-        assert!(valid_nets.contains(&wire.net_name), "Unknown net: {}", wire.net_name);
+        assert!(
+            valid_layers.contains(&wire.layer),
+            "Unknown layer: {}",
+            wire.layer
+        );
+        assert!(
+            valid_nets.contains(&wire.net_name),
+            "Unknown net: {}",
+            wire.net_name
+        );
         assert!(wire.width > 0, "Non-positive wire width");
         for &(x, y) in &wire.points {
-            assert!(x >= rb_min_x - margin && x <= rb_max_x + margin, "x={} out of bounds", x);
-            assert!(y >= rb_min_y - margin && y <= rb_max_y + margin, "y={} out of bounds", y);
+            assert!(
+                x >= rb_min_x - margin && x <= rb_max_x + margin,
+                "x={} out of bounds",
+                x
+            );
+            assert!(
+                y >= rb_min_y - margin && y <= rb_max_y + margin,
+                "y={} out of bounds",
+                y
+            );
         }
     }
     for via in &result.vias {
@@ -851,7 +992,11 @@ fn test_route_dac2020_benchmark() {
         assert!(via.y >= rb_min_y - margin && via.y <= rb_max_y + margin);
     }
     for name in &result.unrouted {
-        assert!(valid_nets.contains(name), "Unrouted references unknown net: {}", name);
+        assert!(
+            valid_nets.contains(name),
+            "Unrouted references unknown net: {}",
+            name
+        );
     }
 
     // SES output must be valid
@@ -861,7 +1006,11 @@ fn test_route_dac2020_benchmark() {
     let _ = std::fs::remove_file(&ses_tmp);
 
     let parsed = Sexp::parse(&ses_content);
-    assert!(parsed.is_ok(), "dac2020 SES not valid sexp: {}", parsed.unwrap_err());
+    assert!(
+        parsed.is_ok(),
+        "dac2020 SES not valid sexp: {}",
+        parsed.unwrap_err()
+    );
     let open = ses_content.chars().filter(|&c| c == '(').count();
     let close = ses_content.chars().filter(|&c| c == ')').count();
     assert_eq!(open, close, "Parentheses unbalanced in dac2020 SES");
@@ -886,17 +1035,38 @@ fn test_route_smoothieboard_benchmark() {
     let margin = design.rules.trace_width.max(design.rules.clearance) * 3;
 
     // Should route all nets
-    assert_eq!(result.unrouted.len(), 0,
-        "Expected all nets routed on smoothieboard; {} unrouted: {:?}", result.unrouted.len(), result.unrouted);
+    assert_eq!(
+        result.unrouted.len(),
+        0,
+        "Expected all nets routed on smoothieboard; {} unrouted: {:?}",
+        result.unrouted.len(),
+        result.unrouted
+    );
 
     for wire in &result.wires {
         assert!(wire.points.len() >= 2, "Wire segment needs >= 2 points");
-        assert!(valid_layers.contains(&wire.layer), "Unknown layer: {}", wire.layer);
-        assert!(valid_nets.contains(&wire.net_name), "Unknown net: {}", wire.net_name);
+        assert!(
+            valid_layers.contains(&wire.layer),
+            "Unknown layer: {}",
+            wire.layer
+        );
+        assert!(
+            valid_nets.contains(&wire.net_name),
+            "Unknown net: {}",
+            wire.net_name
+        );
         assert!(wire.width > 0, "Non-positive wire width");
         for &(x, y) in &wire.points {
-            assert!(x >= rb_min_x - margin && x <= rb_max_x + margin, "x={} out of bounds", x);
-            assert!(y >= rb_min_y - margin && y <= rb_max_y + margin, "y={} out of bounds", y);
+            assert!(
+                x >= rb_min_x - margin && x <= rb_max_x + margin,
+                "x={} out of bounds",
+                x
+            );
+            assert!(
+                y >= rb_min_y - margin && y <= rb_max_y + margin,
+                "y={} out of bounds",
+                y
+            );
         }
     }
     for via in &result.vias {
@@ -905,7 +1075,11 @@ fn test_route_smoothieboard_benchmark() {
         assert!(via.y >= rb_min_y - margin && via.y <= rb_max_y + margin);
     }
     for name in &result.unrouted {
-        assert!(valid_nets.contains(name), "Unrouted references unknown net: {}", name);
+        assert!(
+            valid_nets.contains(name),
+            "Unrouted references unknown net: {}",
+            name
+        );
     }
 
     // SES output must be valid
@@ -915,10 +1089,51 @@ fn test_route_smoothieboard_benchmark() {
     let _ = std::fs::remove_file(&ses_tmp);
 
     let parsed = Sexp::parse(&ses_content);
-    assert!(parsed.is_ok(), "smoothieboard SES not valid sexp: {}", parsed.unwrap_err());
+    assert!(
+        parsed.is_ok(),
+        "smoothieboard SES not valid sexp: {}",
+        parsed.unwrap_err()
+    );
     let open = ses_content.chars().filter(|&c| c == '(').count();
     let close = ses_content.chars().filter(|&c| c == ')').count();
     assert_eq!(open, close, "Parentheses unbalanced in smoothieboard SES");
+}
+
+#[test]
+fn test_parse_freerouting_fixture_corpus() {
+    let corpus_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("benchmarks")
+        .join("freerouting");
+    if !corpus_dir.exists() {
+        eprintln!(
+            "Skipping freerouting corpus test: {} not found",
+            corpus_dir.display()
+        );
+        return;
+    }
+
+    let mut pending = vec![corpus_dir];
+    let mut dsn_paths = Vec::new();
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).expect("read benchmark directory") {
+            let path = entry.expect("read benchmark entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "dsn") {
+                dsn_paths.push(path);
+            }
+        }
+    }
+
+    dsn_paths.sort();
+    assert!(!dsn_paths.is_empty(), "expected freerouting DSN fixtures");
+
+    for dsn_path in dsn_paths {
+        let content = std::fs::read_to_string(&dsn_path)
+            .unwrap_or_else(|err| panic!("read {}: {}", dsn_path.display(), err));
+        dsn::parse_dsn(&content)
+            .unwrap_or_else(|err| panic!("parse {}: {}", dsn_path.display(), err));
+    }
 }
 
 // ─── Wire segment continuity ──────────────────────────────────────────────────
@@ -931,7 +1146,11 @@ fn test_wire_segments_continuous() {
     let design = dsn::parse_dsn(SIMPLE_DSN).expect("Should parse DSN");
     let result = router::route(&design);
 
-    let net_wires: Vec<_> = result.wires.iter().filter(|w| w.net_name == "NET1").collect();
+    let net_wires: Vec<_> = result
+        .wires
+        .iter()
+        .filter(|w| w.net_name == "NET1")
+        .collect();
     // Each wire must have ≥2 points
     for wire in &net_wires {
         assert!(wire.points.len() >= 2);
@@ -950,7 +1169,14 @@ fn test_wire_segments_continuous() {
             assert!(
                 dx <= tol && dy <= tol,
                 "Gap between consecutive wire segments on layer {}: ({},{}) -> ({},{}) delta=({},{}), tol={}",
-                window[0].layer, end.0, end.1, start.0, start.1, dx, dy, tol,
+                window[0].layer,
+                end.0,
+                end.1,
+                start.0,
+                start.1,
+                dx,
+                dy,
+                tol,
             );
         }
         // If they're on different layers the gap is bridged by a via (tested in via tests)
@@ -1049,7 +1275,8 @@ fn test_crowded_route_single_pass_routes_most() {
         routed >= routable / 2,
         "Expected at least half the nets routed on crowded board, \
          but only {}/{} routed",
-        routed, routable,
+        routed,
+        routable,
     );
 }
 

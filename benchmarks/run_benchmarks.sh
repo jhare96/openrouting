@@ -40,18 +40,14 @@ if [[ ! -x "$OPENROUTING" ]]; then
     exit 1
 fi
 
-# Benchmark DSN files: (filename, description)
-declare -a DSN_FILES=(
-    "dac2020_bm05.dsn"
-    "smoothieboard.dsn"
-)
-declare -A DSN_DESC=(
-    ["dac2020_bm05.dsn"]="DAC 2020 bm05 (audio codec board, 2 layers, 54 nets)"
-    ["smoothieboard.dsn"]="Smoothieboard v1.1 (5-driver CNC, 4 layers, 287 nets)"
+# Benchmark every DSN file in this directory tree, including the imported
+# freerouting fixture corpus.
+mapfile -t DSN_FILES < <(
+    find "$SCRIPT_DIR" -type f -name '*.dsn' -printf '%P\n' | sort
 )
 
 # Pretty-print width
-COL_FILE=30
+COL_FILE=70
 COL_TOOL=12
 COL_TIME=12
 COL_ROUTED=14
