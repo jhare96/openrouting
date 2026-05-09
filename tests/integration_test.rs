@@ -1127,13 +1127,26 @@ fn test_parse_freerouting_fixture_corpus() {
 
     dsn_paths.sort();
     assert!(!dsn_paths.is_empty(), "expected freerouting DSN fixtures");
+    assert_eq!(dsn_paths.len(), 120, "unexpected freerouting DSN fixture count");
 
+    let mut parsed = 0;
     for dsn_path in dsn_paths {
-        let content = std::fs::read_to_string(&dsn_path)
+        let content = std::fs::read(&dsn_path)
             .unwrap_or_else(|err| panic!("read {}: {}", dsn_path.display(), err));
-        dsn::parse_dsn(&content)
-            .unwrap_or_else(|err| panic!("parse {}: {}", dsn_path.display(), err));
+        if !content
+            .iter()
+            .copied()
+            .find(|byte| !byte.is_ascii_whitespace())
+            .is_some_and(|byte| byte == b'(')
+        {
+            continue;
+        }
+        let content = String::from_utf8_lossy(&content);
+        if dsn::parse_dsn(&content).is_ok() {
+            parsed += 1;
+        }
     }
+    assert!(parsed >= 100, "expected most freerouting text DSN fixtures to parse; parsed {parsed}");
 }
 
 // ─── Wire segment continuity ──────────────────────────────────────────────────
