@@ -6,8 +6,12 @@ This directory contains real-world PCB designs in Specctra DSN format used to be
 
 | File | Layers | Nets | Size | Description | Source |
 |------|--------|------|------|-------------|--------|
-| `dac2020_bm05.dsn` | 2 | 54 | 17 KB | Audio codec evaluation board — part of the DAC 2020 PCB routing academic benchmark set | [freerouting/freerouting](https://github.com/freerouting/freerouting/blob/master/tests/Issue508-DAC2020_bm05.dsn) |
-| `smoothieboard.dsn` | 4 | 287 | 132 KB | [Smoothieboard v1](https://github.com/Smoothieware/Smoothieboard) 5-driver open-source CNC motion controller | [freerouting/freerouting](https://github.com/freerouting/freerouting/blob/master/tests/Issue145-smoothieboard.dsn) |
+| `dac2020_bm05.dsn` | 2 | 54 | 17 KB | Audio codec evaluation board — part of the DAC 2020 PCB routing academic benchmark set | [freerouting/freerouting](https://github.com/freerouting/freerouting/blob/master/fixtures/Issue508-DAC2020_bm05.dsn) |
+| `smoothieboard.dsn` | 4 | 287 | 132 KB | [Smoothieboard v1](https://github.com/Smoothieware/Smoothieboard) 5-driver open-source CNC motion controller | [freerouting/freerouting](https://github.com/freerouting/freerouting/blob/master/fixtures/Issue145-smoothieboard.dsn) |
+
+The `freerouting/` subdirectory mirrors all 120 DSN test-circuit fixtures from
+[`freerouting/freerouting`](https://github.com/freerouting/freerouting/tree/master/fixtures)
+at commit `a8360ae66794dd12ea2f0584f3955b2d6483b2ba` (about 13 MB total).
 
 ### Why these files?
 
@@ -20,7 +24,7 @@ This directory contains real-world PCB designs in Specctra DSN format used to be
 # 1. Build openrouting in release mode first
 cargo build --release
 
-# 2. Run benchmark (openrouting only)
+# 2. Run benchmark over every DSN in benchmarks/
 cd benchmarks
 ./run_benchmarks.sh
 

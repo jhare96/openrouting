@@ -20,7 +20,8 @@ fn main() {
     let input = &args.input;
     let output = args.output.unwrap_or_else(|| input.with_extension("ses"));
 
-    let content = std::fs::read_to_string(input).expect("Failed to read input file");
+    let content = std::fs::read(input).expect("Failed to read input file");
+    let content = String::from_utf8_lossy(&content);
 
     let design = dsn::parse_dsn(&content).expect("Failed to parse DSN file");
 

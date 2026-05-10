@@ -198,11 +198,12 @@ pub fn parse_dsn(input: &str) -> Result<DsnDesign, String> {
     let root = Sexp::parse(input)?;
 
     // The root might be wrapped in an extra list if multiple top-level items exist
-    let pcb = if root.name() == Some("pcb") {
+    let is_pcb = |s: &Sexp| s.name().is_some_and(|name| name.eq_ignore_ascii_case("pcb"));
+    let pcb = if is_pcb(&root) {
         &root
     } else if let Some(list) = root.as_list() {
         list.iter()
-            .find(|s| s.name() == Some("pcb"))
+            .find(|s| is_pcb(s))
             .ok_or("No (pcb ...) top-level form found")?
     } else {
         return Err("No (pcb ...) top-level form found".to_string());
